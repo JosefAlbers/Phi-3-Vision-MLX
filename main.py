@@ -8,7 +8,7 @@ import glob
 from types import SimpleNamespace
 import mlx.nn as nn
 import mlx.core as mx
-from CLIP import VisionModel
+from clip import VisionModel
 
 CLIP_VIT_LARGE_PATCH14_336_CONFIG = SimpleNamespace(
   attention_dropout=0.0,
