@@ -9,30 +9,9 @@ import mlx.core as mx
 import mlx.nn as nn
 import numpy as np
 
-
 @dataclass
 class VisionConfig:
-    model_type: str
-    num_hidden_layers: int = 24
-    hidden_size: int = 1024
-    intermediate_size: int = 4096
-    num_attention_heads: int = 16
-    image_size: int = 336
-    patch_size: int = 14
-    projection_dim: int = 768
-    vocab_size: int = 32000
-    num_channels: int = 3
-    layer_norm_eps: float = 1e-5
-
-    @classmethod
-    def from_dict(cls, params):
-        return cls(
-            **{
-                k: v
-                for k, v in params.items()
-                if k in inspect.signature(cls).parameters
-            }
-        )
+    pass
 
 class Attention(nn.Module):
     def __init__(
@@ -88,7 +67,6 @@ class Attention(nn.Module):
 
         return self.out_proj(output)
 
-
 class MLP(nn.Module):
     def __init__(self, config: VisionConfig):
         super().__init__()
@@ -100,7 +78,6 @@ class MLP(nn.Module):
         x = self.activation_fn(self.fc1(x))
         x = self.fc2(x)
         return x
-
 
 class EncoderLayer(nn.Module):
     def __init__(self, config: VisionConfig):
@@ -121,12 +98,10 @@ class EncoderLayer(nn.Module):
         y = self.mlp(y)
         return x + y
 
-
 class Encoder(nn.Module):
     def __init__(self, config: VisionConfig):
         super().__init__()
         self.layers = [EncoderLayer(config) for _ in range(config.num_hidden_layers)]
-
 
 class VisionEmbeddings(nn.Module):
     def __init__(self, config: VisionConfig):
@@ -164,7 +139,6 @@ class VisionEmbeddings(nn.Module):
         embeddings += self.position_embedding(position_ids)
         return embeddings
 
-
 class ClipVisionModel(nn.Module):
     def __init__(self, config: VisionConfig):
         super().__init__()
@@ -191,7 +165,6 @@ class ClipVisionModel(nn.Module):
         pooler_output = self.post_layernorm(x[:, 0, :])
         return pooler_output, x, encoder_states
 
-
 class VisionModel(nn.Module):
     def __init__(self, config: VisionConfig):
         super().__init__()
@@ -201,4 +174,3 @@ class VisionModel(nn.Module):
         self, x: mx.array, output_hidden_states: Optional[bool] = None
     ) -> mx.array:
         return self.vision_model(x, output_hidden_states)
-

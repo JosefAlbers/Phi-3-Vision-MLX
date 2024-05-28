@@ -1,15 +1,15 @@
 # Phi-3 Vision Model Inference with MLX
 
-This repository provides code for running inference with the Microsoft Phi-3 vision model on Apple Silicon. Phi-3 is a powerful transformer model capable of understanding and generating text in response to both text prompts and images.
+This repository provides code for running inference with the Microsoft [Phi-3-vision-128k-instruct](https://huggingface.co/microsoft/Phi-3-vision-128k-instruct) model on Apple Silicon. The code prioritizes a simplified, barebones implementation of the VLM model within the [MLX](https://github.com/ml-explore/mlx/issues/12) framework. 
 
 ## Key Features
 
-Su-scaled Rotary Position Embeddings: Utilizes Su-scaled Rotary Position Embeddings for enhanced positional encoding.
+- Su-scaled RoPE: Utilizes Su-scaled Rotary Position Embeddings for enhanced positional encoding.
 
 ## Example Usage
 
 ```python
-phi3v("<|user|>Write a short funny sci-fi.<|end|>\n<|assistant|>\n")
+generate("<|user|>Write a short funny sci-fi.<|end|>\n<|assistant|>\n")
 ```
 
 ```zsh
@@ -21,7 +21,7 @@ In the year 3021, the intergalactic space station, Orion-7, was the hub of all s
 ```python
 prompt = f"<|user|>\n<|image_1|>\nWhat is shown in this image?<|end|>\n<|assistant|>\n"
 images = [Image.open(requests.get("https://assets-c4akfrf5b4d3f4b7.z01.azurefd.net/assets/2024/04/BMDataViz_661fb89f3845e.png" , stream=True).raw)]
-phi3v(prompt, images)
+generate(prompt, images)
 ```
 
 ```zsh
