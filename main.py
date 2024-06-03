@@ -274,16 +274,11 @@ class Phi3SuScaledRotaryEmbedding:
         self.scaling_factor = math.sqrt(1 + math.log(config.max_position_embeddings / config.original_max_position_embeddings) / math.log(config.original_max_position_embeddings))
 
     def _get_cos_sin(self, offset, L, pids):
-        def _get_pids(offset, L, pids_tensor):
+        def _get_pids(offset, L, pids):
             if offset < 1:
                 return pids
-            last_column = pids_tensor[:, -1][:,None]
-            start_indices = last_column + offset - pids_tensor.shape[1] + 2
-            range_tensor = torch.arange(L)[None].expand(start_indices.shape[0], -1)
-            final_pids_tensor = start_indices + range_tensor
-            return mx.array(final_pids_tensor)
-
-        position_ids = _get_pids(offset, L, pids) if pids is not None else mx.arange(offset, offset+L, dtype=mx.float32)[None]
+            return pids[:, -1][:, None] + offset - pids.shape[1] + 2 + mx.arange(L)[None, :]
+        position_ids = mx.arange(offset, offset+L, dtype=mx.float32)[None] if pids is None else _get_pids(offset, L, pids)
         inv_freq = self.inv_freq_long if position_ids.max()+1 > self.original_max_position_embeddings else self.inv_freq_short
         inv_freq_expanded = mx.repeat(inv_freq[None, :, None], position_ids.shape[0], axis=0)
         position_ids_expanded = position_ids[:, None, :]
