@@ -202,7 +202,6 @@ class Phi3VImageProcessor:
         elems = [HD_transform(im, hd_num = self.num_crops) for im in images] 
         nrmlz = lambda img: ((np.array(img) / 255.0 - self.image_mean) / self.image_std).transpose(2,0,1)
         hd_images = [nrmlz(im) for im in elems]
-        # global_image = [interpolate_336(im[None]) for im in hd_images] # or 
         global_image = [torch.nn.functional.interpolate(torch.from_numpy(im[None]), size=(336, 336), mode='bicubic').numpy() for im in hd_images]
         shapes = [[im.shape[1], im.shape[2]] for im in hd_images]
         num_img_tokens = [int((h//336*w//336+1)*144 + 1 + (h//336+1)*12) for h, w in shapes]
@@ -246,7 +245,7 @@ class Phi3ImageEmbedding(nn.Module):
         B = img_embeds.shape[0]
         img_sizes, positions = (img_sizes // 336).tolist(), positions.tolist()
         img_features = self.img_processor.vision_model(img_embeds.reshape(-1, *img_embeds.shape[2:]).transpose(0, 2, 3, 1))
-        img_features = img_features.reshape(B, *img_features.shape)
+        img_features = img_features.reshape(B, -1, *img_features.shape[1:])
         C, H = self.image_dim_out, int(img_features.shape[2] ** 0.5)
         output_imgs, output_len = [], []
         for _bs in range(B):
@@ -268,43 +267,39 @@ class Phi3ImageEmbedding(nn.Module):
         return txt_embeds
 
 class Phi3SuScaledRotaryEmbedding:
-    def __init__(self, dim, config):
-        self.dim = dim
-        self.base = config.rope_theta 
-        self.short_factor = config.rope_scaling["short_factor"]
-        self.long_factor = config.rope_scaling["long_factor"]
+    def __init__(self, dim, config, **kwargs):
+        self.inv_freq_short = 1.0 / (mx.array(config.rope_scaling["short_factor"], dtype=mx.float32) * config.rope_theta**(mx.arange(0, dim, 2, dtype=mx.float32) / dim))
+        self.inv_freq_long = 1.0 / (mx.array(config.rope_scaling["long_factor"], dtype=mx.float32) * config.rope_theta**(mx.arange(0, dim, 2, dtype=mx.float32) / dim))
         self.original_max_position_embeddings = config.original_max_position_embeddings
         self.scaling_factor = math.sqrt(1 + math.log(config.max_position_embeddings / config.original_max_position_embeddings) / math.log(config.original_max_position_embeddings))
-        self.inv_freq = None
 
-    def __call__(self, q, k, p):
-        cos, sin = self._get_cos_sin(p)
-        q, k = self._apply_rotary_pos_emb(q, k, cos, sin)
-        return q, k
+    def _get_cos_sin(self, offset, L, pids):
+        def _get_pids(offset, L, pids_tensor):
+            if offset < 1:
+                return pids
+            last_column = pids_tensor[:, -1][:,None]
+            start_indices = last_column + offset - pids_tensor.shape[1] + 2
+            range_tensor = torch.arange(L)[None].expand(start_indices.shape[0], -1)
+            final_pids_tensor = start_indices + range_tensor
+            return mx.array(final_pids_tensor)
 
-    def _get_cos_sin(self, position_ids):
-        seq_len = position_ids.max() + 1
-        ext_factors = mx.array(self.long_factor, dtype=mx.float32) if seq_len > self.original_max_position_embeddings else mx.array(self.short_factor, dtype=mx.float32)
-        inv_freq_shape = mx.arange(0, self.dim, 2, dtype=mx.float32) / self.dim
-        self.inv_freq = 1.0 / (ext_factors * self.base**inv_freq_shape)
-        inv_freq_expanded = mx.repeat(self.inv_freq[None, :, None], position_ids.shape[0], axis=0)
-        position_ids_expanded = mx.array(position_ids, dtype=mx.float32)[:, None, :]
+        position_ids = _get_pids(offset, L, pids) if pids is not None else mx.arange(offset, offset+L, dtype=mx.float32)[None]
+        inv_freq = self.inv_freq_long if position_ids.max()+1 > self.original_max_position_embeddings else self.inv_freq_short
+        inv_freq_expanded = mx.repeat(inv_freq[None, :, None], position_ids.shape[0], axis=0)
+        position_ids_expanded = position_ids[:, None, :]
         freqs = (inv_freq_expanded @ position_ids_expanded).transpose(0, 2, 1)  
         emb = mx.concatenate([freqs, freqs], axis=-1)  
         cos = mx.cos(emb) * self.scaling_factor
         sin = mx.sin(emb) * self.scaling_factor
-        return cos, sin 
+        return mx.expand_dims(cos, axis=1), mx.expand_dims(sin, axis=1) 
 
-    def _apply_rotary_pos_emb(selkf, q, k, cos, sin):
-        def rotate_half(x):
+    def __call__(self, q, k=None, offset=0, pids=None):
+        def _rotate_half(x):
             midpoint = x.shape[-1] // 2  
             x1, x2 = x[..., :midpoint], x[..., midpoint:]  
             return mx.concatenate([-x2, x1], axis = -1) 
-        cos = mx.expand_dims(cos, axis=1)  
-        sin = mx.expand_dims(sin, axis=1)
-        q_embed = (q * cos) + (rotate_half(q) * sin)
-        k_embed = (k * cos) + (rotate_half(k) * sin)
-        return q_embed, k_embed
+        cos, sin = self._get_cos_sin(offset, q.shape[2], pids)
+        return (q * cos) + (_rotate_half(q) * sin) if k is None else (q * cos) + (_rotate_half(q) * sin), (k * cos) + (_rotate_half(k) * sin)
 
 def _get_mask_4d(past_key_values_length, L, mask):
     mask_4d = mx.triu(mx.full((L+past_key_values_length, L+past_key_values_length), -mx.inf), k=1)[None, None]
@@ -331,9 +326,9 @@ class Phi3Attention(nn.Module):
         op_size = n_heads * head_dim + 2 * (n_kv_heads * head_dim)
         self.qkv_proj = nn.Linear(dim, op_size, bias=False)
         self.o_proj = nn.Linear(n_heads * head_dim, dim, bias=False)
-        self.rotary_emb = Phi3SuScaledRotaryEmbedding(self.head_dim, config)
+        self.rope = Phi3SuScaledRotaryEmbedding(self.head_dim, config)
         self.use_quantized_cache=getattr(config, "use_quantized_cache", False)
-    def __call__(self, x, cache, mask=None):
+    def __call__(self, x, cache, pids=None, mask=None):
         B, L, D = x.shape
         qkv = self.qkv_proj(x)
         query_pos = self.n_heads * self.head_dim
@@ -341,27 +336,26 @@ class Phi3Attention(nn.Module):
         queries = queries.reshape(B, L, self.n_heads, -1).transpose(0, 2, 1, 3)
         keys = keys.reshape(B, L, self.n_kv_heads, -1).transpose(0, 2, 1, 3)
         values = values.reshape(B, L, self.n_kv_heads, -1).transpose(0, 2, 1, 3)
-        if self.use_quantized_cache:
-            past_key_values_length = cache[0][0].shape[0] if cache is not None else 0  
-        else:
-            past_key_values_length = cache[0].shape[2] if cache is not None else 0        
-        position_ids = mx.arange(past_key_values_length, past_key_values_length+L, dtype=mx.float32)[None]
-        queries, keys = self.rotary_emb(queries, keys, position_ids)
-        if past_key_values_length > 0:
+        if cache is not None:
             if self.use_quantized_cache:
                 key_cache = mx.dequantize(*cache[0], group_size=32).reshape((B, self.n_kv_heads, -1, self.head_dim))
                 value_cache = mx.dequantize(*cache[1], group_size=32).reshape((B, self.n_kv_heads, -1, self.head_dim))
             else:
                 key_cache, value_cache = cache
+            past_key_values_length = key_cache.shape[2]
+            queries, keys = self.rope(queries, keys, offset=past_key_values_length, pids=pids)
             keys = mx.concatenate([key_cache, keys], axis=2)
             values = mx.concatenate([value_cache, values], axis=2)
+        else:
+            past_key_values_length = 0
+            queries, keys = self.rope(queries, keys, offset=0, pids=pids)
         scores = (queries * self.scale) @ keys.transpose(0, 1, 3, 2)
         scores += _get_mask_4d(past_key_values_length, L, mask)
         scores = mx.softmax(scores, axis=-1)
         output = scores @ values
         output = output.transpose(0, 2, 1, 3).reshape(B, L, -1)
         if self.use_quantized_cache:
-            return self.o_proj(output), (mx.quantize(keys.reshape((-1,32*96)), group_size=32), mx.quantize(values.reshape((-1,32*96)), group_size=32))
+            return self.o_proj(output), (mx.quantize(keys.reshape((B*self.n_kv_heads,-1)), group_size=32), mx.quantize(values.reshape((B*self.n_kv_heads,-1)), group_size=32))
         else:
             return self.o_proj(output), (keys, values)
 
@@ -384,19 +378,57 @@ class Phi3DecoderLayer(nn.Module):
         self.input_layernorm = nn.RMSNorm(config.hidden_size, eps=config.rms_norm_eps)
         self.post_attention_layernorm = nn.RMSNorm(config.hidden_size, eps=config.rms_norm_eps)
 
-    def __call__(self, x, cache, mask):
-        r, cache = self.self_attn(self.input_layernorm(x), cache, mask)
+    def __call__(self, x, cache, pids, mask):
+        r, cache = self.self_attn(self.input_layernorm(x), cache, pids, mask)
         h = x + r
         r = self.mlp(self.post_attention_layernorm(h))
         return h + r, cache
+
+class Phi3VModel(nn.Module):
+    def __init__(self, config):
+        super().__init__()
+        self.embed_tokens = nn.Embedding(config.vocab_size, config.hidden_size)
+        self.vision_embed_tokens = Phi3ImageEmbedding(config)
+        self.layers = [Phi3DecoderLayer(config) for _ in range(config.num_hidden_layers)]
+        self.norm = nn.RMSNorm(config.hidden_size, eps=config.rms_norm_eps)
+    def __call__(self, input_ids, pixel_values, image_sizes, positions, cache, pids, mask):
+        x = self.embed_tokens(input_ids)
+        if pixel_values is not None:
+            x = self.vision_embed_tokens(x, pixel_values, image_sizes, positions)
+        cache = [None] * len(self.layers) if cache is None else cache
+        for i, l in enumerate(self.layers):
+            x, cache[i] = l(x, cache[i], pids, mask)
+        return self.norm(x), cache
+
+class Phi3VLModel(nn.Module):
+    def __init__(self, config):
+        super().__init__()
+        self.config = config
+        self.model = Phi3VModel(config)
+        self.lm_head = nn.Linear(config.hidden_size, config.vocab_size, bias=False)
+    def __call__(self, input_ids, pixel_values=None, image_sizes=None, positions=None, cache=None, pids=None, mask=None):
+        x, cache = self.model(input_ids, pixel_values, image_sizes, positions, cache, pids, mask)
+        return self.lm_head(x), cache
+    @property
+    def layers(self):
+        return self.model.layers
 
 class Phi3VProcessor:
     def __init__(self, local_dir):
         self.tokenizer = AutoTokenizer.from_pretrained(local_dir)
         self.img_processor = Phi3VImageProcessor()
+    def _tokenize(self, texts):
+        if isinstance(texts, str):
+            return {'input_ids': mx.array(self.tokenizer(texts).input_ids)[None]}
+        input_ids = self.tokenizer(texts).input_ids
+        max_length = max(len(sublist) for sublist in input_ids)
+        position_ids = mx.array([[1]*(max_length-len(sublist)) + list(range(len(sublist))) for sublist in input_ids])
+        attention_masks = mx.array([[0]*(max_length-len(sublist)) + [1]*len(sublist) for sublist in input_ids])
+        input_ids = mx.array([[0]*(max_length-len(sublist)) + sublist for sublist in input_ids])
+        return {'input_ids':input_ids, 'pids':position_ids, 'mask':attention_masks}
     def __call__(self, images, texts):
         if images is None:
-            return {'input_ids': mx.array(self.tokenizer.encode(texts))[None]}
+            return self._tokenize(texts)
         image_inputs = self.img_processor(images)
         return self._merge(image_inputs, texts)
     def _merge(self, images, texts):
@@ -418,35 +450,6 @@ class Phi3VProcessor:
                 "pixel_values": mx.array(images), 
                 "image_sizes": mx.array(image_sizes),
                 "positions": mx.array(positions)}
-
-class Phi3VModel(nn.Module):
-    def __init__(self, config):
-        super().__init__()
-        self.embed_tokens = nn.Embedding(config.vocab_size, config.hidden_size)
-        self.vision_embed_tokens = Phi3ImageEmbedding(config)
-        self.layers = [Phi3DecoderLayer(config) for _ in range(config.num_hidden_layers)]
-        self.norm = nn.RMSNorm(config.hidden_size, eps=config.rms_norm_eps)
-    def __call__(self, input_ids, pixel_values, image_sizes, positions, cache, mask):
-        x = self.embed_tokens(input_ids)
-        if pixel_values is not None:
-            x = self.vision_embed_tokens(x, pixel_values, image_sizes, positions)
-        cache = [None] * len(self.layers) if cache is None else cache
-        for i, l in enumerate(self.layers):
-            x, cache[i] = l(x, cache[i], mask)
-        return self.norm(x), cache
-
-class Phi3VLModel(nn.Module):
-    def __init__(self, config):
-        super().__init__()
-        self.config = config
-        self.model = Phi3VModel(config)
-        self.lm_head = nn.Linear(config.hidden_size, config.vocab_size, bias=False)
-    def __call__(self, input_ids, pixel_values=None, image_sizes=None, positions=None, cache=None, mask=None):
-        x, cache = self.model(input_ids, pixel_values, image_sizes, positions, cache, mask)
-        return self.lm_head(x), cache
-    @property
-    def layers(self):
-        return self.model.layers
 
 def linear_to_lora_layers(model, lora_layers, config):
     if isinstance(lora_layers, int):
@@ -495,24 +498,27 @@ def generate(model, processor, prompt, images=None, max_tokens=100, verbose=True
     logits, cache = model(**dict_input)
     prompt_time = time.perf_counter() - tic
     tic = time.perf_counter()
-    token = mx.argmax(logits[:, -1, :], axis=-1)
-    list_tokens = token.tolist()
-    print(processor.tokenizer.decode(list_tokens[-1]), end=' ', flush=True) if stream else None
-    for _ in range(max_tokens-1):
-        logits, cache = model(input_ids=token[None], cache=cache)
-        token = mx.argmax(logits[:, -1, :], axis=-1)
-        list_tokens += token.tolist()
-        print(processor.tokenizer.decode(list_tokens[-1]), end=' ', flush=True) if stream else None
-        if list_tokens[-1] == processor.tokenizer.eos_token_id:
-            break
-    print(processor.tokenizer.decode(list_tokens)) if not stream else None
+    token = mx.argmax(logits[:, -1, :], axis=-1)[:,None]
+    list_tokens = [token]
+    mask=dict_input.get('mask', None)
+    pids=dict_input.get('pids', None)
+    for i in range(max_tokens-1):
+        logits, cache = model(input_ids=token, cache=cache, mask=mask, pids=pids)
+        token = mx.argmax(logits[:, -1, :], axis=-1)[:,None]
+        list_tokens.append(token)
+    list_tokens = mx.concatenate(list_tokens, axis=1)
+
+    result = [processor.tokenizer.decode(i) for i in list_tokens.tolist()]
+    for i, gen in enumerate(result):
+        print(f'\n< Generated text for prompt #{i} >') if len(result) > 1 else None
+        print(gen)
     if verbose:
         gen_time = time.perf_counter() - tic
-        prompt_tps = len(dict_input['input_ids']) / prompt_time
-        gen_tps = (len(list_tokens) - 1) / gen_time
+        prompt_tps =  dict_input['input_ids'].size / prompt_time
+        gen_tps = (list_tokens.size - 1) / gen_time
         print(f"\nPrompt: {prompt_tps:.3f} tokens-per-sec")
         print(f"Generation: {gen_tps:.3f} tokens-per-sec")
-    return processor.tokenizer.decode(list_tokens)
+    return result
     
 def quantize(from_path='phi3v', to_path='quantized_phi3v', q_group_size=64, q_bits=4):
     if not os.path.exists(from_path):
@@ -695,4 +701,5 @@ model, processor = load(model_path='quantized_phi3v', use_quantized_cache=True) 
 
 generate(model, processor, "<|user|>\n<|image_1|>\nWhat is shown in this image?<|end|>\n<|assistant|>\n", [Image.open(requests.get("https://assets-c4akfrf5b4d3f4b7.z01.azurefd.net/assets/2024/04/BMDataViz_661fb89f3845e.png" , stream=True).raw)])
 generate(model, processor, "<|user|>Write a sci-fi thriller.<|end|>\n<|assistant|>\n")
+generate(model, processor, ["<|user|>Write an executive summary for a communications business plan<|end|>\n<|assistant|>\n", "<|user|>Write a resume.<|end|>\n<|assistant|>\n", "<|user|>Write a mystery horror.<|end|>\n<|assistant|>\n","<|user|>Write a Neurology ICU Admission Note.<|end|>\n<|assistant|>\n"])
 """

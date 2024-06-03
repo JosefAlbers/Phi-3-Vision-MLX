@@ -5,8 +5,9 @@ This project brings the powerful phi-3-vision VLM to Apple's MLX framework, offe
 ## Key Features
 
 * **Su-scaled RoPE:** Implements Su-scaled Rotary Position Embeddings to manage sequences of up to 128K tokens.
-* **Model Quantization:** Reduce model size for faster loading and deployment (2.3GB quantized vs 8.5GB original).
 * **KV Cache Quantization:** Optimize inference for processing long contexts with minimal overhead (5.3s quantized vs 5.1s original).
+* **Batch Generation:** Accelerate inference by generating text for multiple prompts concurrently (71 tokens-per-sec batched vs 34 tokens-per-sec single)
+* **Model Quantization:** Reduce model size for faster loading and deployment (2.3GB quantized vs 8.5GB original).
 * **LoRA Training:** Easily customize the model for specific tasks or datasets using LoRA.
 * **Benchmarking:** Quickly assess model performance on any dataset (WIP).
 
@@ -96,6 +97,72 @@ Prompt: 63.946 tokens-per-sec
 Generation: 17.143 tokens-per-sec
 9.12s user 3.69s system 142% cpu 8.978 total
 ```
+
+**Batched Generation**
+
+```python
+generate(model, processor, [
+    "<|user|>Write an executive summary for a communications business plan<|end|>\n<|assistant|>\n", 
+    "<|user|>Write a resume.<|end|>\n<|assistant|>\n", 
+    "<|user|>Write a mystery horror.<|end|>\n<|assistant|>\n",
+    "<|user|>Write a Neurology ICU Admission Note.<|end|>\n<|assistant|>\n"])
+```
+
+```zsh
+< Generated text for prompt #0 >
+Title: Communications Business Plan
+
+Executive Summary:
+
+Our communications business aims to provide high-quality, reliable, and affordable communication solutions to our clients. We will achieve this by leveraging the latest technology, offering personalized customer service, and maintaining a strong focus on customer satisfaction.
+
+Our services will include voice and data communication, as well as internet and mobile services. We will also offer value-added services such as call forwarding,
+
+< Generated text for prompt #1 >
+[Name]
+
+[Address]
+
+[Phone Number]
+
+[Email Address]
+
+Objective:
+
+To secure a position as a [Job Title] in [Company Name] that utilizes my skills and experience in [Specific Skill/Experience] to contribute to the success of the organization.
+
+Education:
+
+[University Name], [City, State]
+
+Bachelor of Science in [Field of Study
+
+< Generated text for prompt #2 >
+Title: The Haunting of Hillcrest Manor
+
+In the small, sleepy town of Willow Creek, nestled at the edge of a dense forest, stood Hillcrest Manor, a once-grand estate that had fallen into disrepair. The locals whispered of its former glory days, when it was the home of the wealthy and influential Hawthorne family. But those days were long gone, and the manor had been abandoned
+
+< Generated text for prompt #3 >
+Patient Name: John Doe
+
+Date of Admission: 01/01/2022
+
+Time of Admission: 10:00 AM
+
+Attending Physician: Dr. Jane Smith
+
+Chief Complaint: Acute onset of severe headache, photophobia, and neck stiffness.
+
+History of Present Illness:
+
+- Sudden onset of severe headache
+
+Prompt: 4859.885 tokens-per-sec
+Generation: 71.642 tokens-per-sec
+python 240524.py  5.22s user 4.06s system 113% cpu 8.179 total
+```
+
+*(Paddings for each input prompt and their corresponding attention masks, and position IDs are properly handled by the generate() function to ensure correct model behavior)*
 
 **LoRA Training**
 
@@ -202,7 +269,7 @@ Final Score: 0.6(6/10)
 ```
 </pre></details><br>
 
-*(The train_lora function includes an experimental 'mask_ratios' option to apply token-level dropout during training, for improved model robustness, faster convergence, and better generalization to out-of-sample examples)*
+*(The train_lora() function includes an experimental 'mask_ratios' option to apply token-level dropout during training, for improved model robustness, faster convergence, and better generalization to out-of-sample examples)*
 
 ## Installation
 
