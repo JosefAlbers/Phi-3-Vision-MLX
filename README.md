@@ -105,7 +105,8 @@ generate(model, processor, [
     "<|user|>Write an executive summary for a communications business plan<|end|>\n<|assistant|>\n", 
     "<|user|>Write a resume.<|end|>\n<|assistant|>\n", 
     "<|user|>Write a mystery horror.<|end|>\n<|assistant|>\n",
-    "<|user|>Write a Neurology ICU Admission Note.<|end|>\n<|assistant|>\n"])
+    "<|user|>Write a Neurology ICU Admission Note.<|end|>\n<|assistant|>\n"]
+)
 ```
 
 ```zsh
@@ -162,7 +163,7 @@ Generation: 71.642 tokens-per-sec
 python 240524.py  5.22s user 4.06s system 113% cpu 8.179 total
 ```
 
-*(Paddings for each input prompt and their corresponding attention masks, and position IDs are properly handled by the generate() function to ensure correct model behavior)*
+*(Paddings for each input prompt and their corresponding attention masks, and position IDs are properly handled by the `generate` function to ensure correct model behavior)*
 
 **LoRA Training**
 
@@ -269,7 +270,30 @@ Final Score: 0.6(6/10)
 ```
 </pre></details><br>
 
-*(The train_lora() function includes an experimental 'mask_ratios' option to apply token-level dropout during training, for improved model robustness, faster convergence, and better generalization to out-of-sample examples)*
+*(The `train_lora` function includes an experimental 'mask_ratios' option to apply token-level dropout during training, for improved model robustness, faster convergence, and better generalization to out-of-sample examples)*
+
+** Chat Template **
+
+```python
+# Multiple text inputs
+chat([
+    "Write an executive summary for a communications business plan",                               
+    "Write a resume.", 
+    "Write a mystery horror.",
+    "Write a Neurology ICU Admission Note."])
+
+# Multiple image inputs
+chat("What is shown in the first image?", [ 
+    "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcTSyGT7IkhN12m2EnWGOoqxilYcwnnEWECm_A&s", 
+    "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcSWWjEYFx5X88A7K4th2o_dNkQu9Ipk6q98sA&s",
+    "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcREhh6bTTDNosQrJvAN6LZmPG98k4dYdt14DA&s",
+])
+
+# Single string input also allowed
+chat('Write a space opera.', model_path='quantized_phi3v')                                          
+```
+
+*(The `chat` function provides a user-friendly interface for interacting with the model.)*
 
 ## Installation
 

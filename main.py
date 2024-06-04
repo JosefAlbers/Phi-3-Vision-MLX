@@ -20,6 +20,56 @@ from types import SimpleNamespace
 from transformers import AutoTokenizer
 import time
 
+class TrainingCallback:
+    def __init__(self, lora_cfg, lr_schedule, sum_every=3):
+        self.lora_cfg = lora_cfg
+        self.adapter_path = lora_cfg['adapter_path']
+        self.lr_schedule = lr_schedule
+        self.sum_every = sum_every
+        self.current_step = 0
+        self.sum_loss = .0
+        self.best_loss = math.inf
+        self.train_log = {'step_i': [], 'step_loss': [], 'avg_i': [], 'avg_loss': []}
+        self.start_time = time.perf_counter()
+
+    def __call__(self, model, lvalue):
+        self.current_step += 1
+        step_loss = lvalue.item()
+        print(f'- Step loss at step {self.current_step}: {step_loss}')
+        self.train_log['step_i'].append(self.current_step)
+        self.train_log['step_loss'].append(step_loss)
+        self.sum_loss += step_loss
+        
+        if self.current_step % self.sum_every == 0:
+            avg_loss = self.sum_loss / self.sum_every
+            self.sum_loss = 0.0
+            self.train_log['avg_i'].append(self.current_step)
+            self.train_log['avg_loss'].append(avg_loss)
+            print(f'Avg loss at step {self.current_step}: {avg_loss}')
+            if avg_loss < self.best_loss:
+                self.best_loss = avg_loss
+                mx.save_safetensors(f'{self.adapter_path}/adapters.safetensors', dict(tree_flatten(model.trainable_parameters())))
+
+    def end_log(self):
+        train_log = self.train_log
+        train_log['train_time'] = time.perf_counter() - self.start_time
+        with open(f'{self.adapter_path}/adapter_config.json', "w") as f:
+            json.dump(self.lora_cfg, f, indent=4)
+        with open(f'{self.adapter_path}/adapter_train_log.json', "w") as f:
+            json.dump(train_log, f, indent=4)
+        fig, (ax1, ax2) = plt.subplots(2, 1)
+        ax1.plot(train_log['step_i'], train_log['step_loss'], color='b', alpha=0.5, label='Step Loss')
+        ax1.plot(train_log['avg_i'], train_log['avg_loss'], color='r', label='Avg Loss')
+        ax1.set_title('Training Loss Curves')
+        ax1.legend()
+        ax2.plot(self.lr_schedule)
+        ax2.ticklabel_format(axis='y', style='sci')
+        ax2.set_title('Learning Rate Schedule')
+        plt.tight_layout() 
+        fig.savefig(f'train_log.png')
+        print(f"Training log saved to {self.adapter_path}")
+        print(f"Total training time: {train_log['train_time']:.2f} seconds")
+
 class LoRALinear(nn.Module): # copied from mlx-examples (https://github.com/ml-explore/mlx-examples/blob/main/llms/mlx_lm/tuner/lora.py)
     @staticmethod
     def from_linear(
@@ -69,6 +119,19 @@ class LoRALinear(nn.Module): # copied from mlx-examples (https://github.com/ml-e
         y = self.linear(x)
         z = (self.dropout(x) @ self.lora_a) @ self.lora_b
         return y + (self.scale * z).astype(x.dtype)
+
+def linear_to_lora_layers(model, lora_layers, config):
+    if isinstance(lora_layers, int):
+        lora_layers = model.layers[-lora_layers:]
+    elif isinstance(lora_layers, list):
+        lora_layers = [model.layers[i] for i in lora_layers]
+    else:
+        raise ValueError("Invalid type for lora_layers. Expected int (number of layers) or list (layer indices or names).")
+    def to_lora(layer):
+        return LoRALinear.from_linear( layer, r=config["rank"], alpha=config["alpha"], scale=config["scale"], dropout=config["dropout"])
+    for l in lora_layers:
+        lora_layers = [(k, to_lora(m)) for k, m in l.named_modules() if k == "self_attn.qkv_proj"]
+        l.update_modules(tree_unflatten(lora_layers))
 
 class ClipAttention(nn.Module):
     def __init__(self, dims, num_heads, bias=True):
@@ -170,55 +233,44 @@ class Phi3VImageProcessor:
         self.image_std=np.array([0.26862954, 0.26130258, 0.27577711])
     
     def __call__(self, images):
-        images = [image.convert('RGB') for image in images]
-        def HD_transform(img, hd_num=16):
-            width, height = img.size
+        def HD_transform(img):
+            img = img.convert('RGB')
+            w, h = img.size
             trans = False
-            if width < height:
+            if w < h:
                 img = img.transpose(Image.TRANSPOSE)
                 trans = True
-                width, height = img.size
-
-            ratio = (width/ height)
-            scale = 1
-            while scale*np.ceil(scale/ratio) <= hd_num:
-                scale += 1
-            scale -= 1
-            new_w = int(scale * 336)
-            new_h = int(new_w / ratio)
-
-            img = img.resize([new_w, new_h], Image.BILINEAR)
-            def padding_336(b):
-                width, height = b.size
-                diff_height = int(np.ceil(height / 336) * 336) - height
+                w, h = img.size
+            scale = int(np.sqrt(self.num_crops * w / h))
+            img = img.resize([int(scale * 336), int(scale * 336 * h / w)], Image.BILINEAR)
+            def pad_to_336(b):
+                _, h = b.size
+                diff_height = int(np.ceil(h / 336) * 336) - h
                 top_padding = int(diff_height/2)
                 bottom_padding = diff_height - top_padding
                 b = ImageOps.expand(b, border=(0, top_padding, 0, bottom_padding), fill=(255, 255, 255))
                 return b
-            img = padding_336(img)
-            if trans:
-                img = img.transpose(Image.TRANSPOSE)
+            img = pad_to_336(img)
+            img = img.transpose(Image.TRANSPOSE) if trans else img
+            img = ((np.array(img) / 255.0 - self.image_mean) / self.image_std).transpose(2,0,1)
             return img
-        elems = [HD_transform(im, hd_num = self.num_crops) for im in images] 
-        nrmlz = lambda img: ((np.array(img) / 255.0 - self.image_mean) / self.image_std).transpose(2,0,1)
-        hd_images = [nrmlz(im) for im in elems]
-        global_image = [torch.nn.functional.interpolate(torch.from_numpy(im[None]), size=(336, 336), mode='bicubic').numpy() for im in hd_images]
-        shapes = [[im.shape[1], im.shape[2]] for im in hd_images]
-        num_img_tokens = [int((h//336*w//336+1)*144 + 1 + (h//336+1)*12) for h, w in shapes]
-        hd_images_reshape = [im
-            .reshape(1, 3, h//336, 336, w//336, 336)
-            .transpose(0,2,4,1,3,5)
-            .reshape(-1, 3, 336, 336)
-            for im, (h, w) in zip(hd_images, shapes)]
-        hd_images_reshape = [np.concatenate([_global_image, _im], axis=0) for _global_image, _im in zip(global_image, hd_images_reshape)]
         def pad_to_max_num_crops_tensor(images, max_crops=17):
             B, _, H, W = images.shape
             if B < max_crops:
                 pad = np.zeros((max_crops - B, 3, H, W))
                 images = np.concatenate([images, pad], axis=0)
             return images
-        image_transformed = [pad_to_max_num_crops_tensor(im) for im in hd_images_reshape]
-        image_transformed = np.stack(image_transformed, axis=0)
+        hd_images = [HD_transform(img) for img in images] 
+        shapes = [[im.shape[1], im.shape[2]] for im in hd_images]
+        num_img_tokens = [int((h//336*w//336+1)*144 + 1 + (h//336+1)*12) for h, w in shapes]
+        global_image = [torch.nn.functional.interpolate(torch.from_numpy(im[None]), size=(336, 336), mode='bicubic').numpy() for im in hd_images]
+        hd_images_reshape = [im
+            .reshape(1, 3, h//336, 336, w//336, 336)
+            .transpose(0,2,4,1,3,5)
+            .reshape(-1, 3, 336, 336)
+            for im, (h, w) in zip(hd_images, shapes)]
+        hd_images_reshape = [np.concatenate([_global_image, _im], axis=0) for _global_image, _im in zip(global_image, hd_images_reshape)]
+        image_transformed = np.stack([pad_to_max_num_crops_tensor(im) for im in hd_images_reshape], axis=0)
         return {"pixel_values": image_transformed, "image_sizes": shapes, "num_img_tokens": num_img_tokens}
 
 class Phi3ImageEmbedding(nn.Module):
@@ -277,7 +329,7 @@ class Phi3SuScaledRotaryEmbedding:
         def _get_pids(offset, L, pids):
             if offset < 1:
                 return pids
-            return pids[:, -1][:, None] + offset - pids.shape[1] + 2 + mx.arange(L)[None, :]
+            return pids[:, -1][:, None] + offset - pids.shape[1] + 1 + mx.arange(L)[None, :]
         position_ids = mx.arange(offset, offset+L, dtype=mx.float32)[None] if pids is None else _get_pids(offset, L, pids)
         inv_freq = self.inv_freq_long if position_ids.max()+1 > self.original_max_position_embeddings else self.inv_freq_short
         inv_freq_expanded = mx.repeat(inv_freq[None, :, None], position_ids.shape[0], axis=0)
@@ -446,19 +498,6 @@ class Phi3VProcessor:
                 "image_sizes": mx.array(image_sizes),
                 "positions": mx.array(positions)}
 
-def linear_to_lora_layers(model, lora_layers, config):
-    if isinstance(lora_layers, int):
-        lora_layers = model.layers[-lora_layers:]
-    elif isinstance(lora_layers, list):
-        lora_layers = [model.layers[i] for i in lora_layers]
-    else:
-        raise ValueError("Invalid type for lora_layers. Expected int (number of layers) or list (layer indices or names).")
-    def to_lora(layer):
-        return LoRALinear.from_linear( layer, r=config["rank"], alpha=config["alpha"], scale=config["scale"], dropout=config["dropout"])
-    for l in lora_layers:
-        lora_layers = [(k, to_lora(m)) for k, m in l.named_modules() if k == "self_attn.qkv_proj"]
-        l.update_modules(tree_unflatten(lora_layers))
-
 def _get_cfg(json_path, **kwargs):
     try:
         with open(json_path, "r") as f:
@@ -488,19 +527,23 @@ def load(model_path='phi3v', adapter_path=None, **kwargs):
     return model, Phi3VProcessor(model_path)
 
 def generate(model, processor, prompt, images=None, max_tokens=100, verbose=True, stream=False):
+    if images is not None and isinstance(prompt, list):
+        raise ValueError('Images cannot be provided when prompt is a list')
     tic = time.perf_counter()
     dict_input = processor(images, prompt)
     logits, cache = model(**dict_input)
-    prompt_time = time.perf_counter() - tic
-    tic = time.perf_counter()
     token = mx.argmax(logits[:, -1, :], axis=-1)[:,None]
     list_tokens = [token]
+    prompt_time = time.perf_counter() - tic
+    tic = time.perf_counter()
     mask=dict_input.get('mask', None)
     pids=dict_input.get('pids', None)
-    for i in range(max_tokens-1):
+    for _ in range(max_tokens-1):
         logits, cache = model(input_ids=token, cache=cache, mask=mask, pids=pids)
         token = mx.argmax(logits[:, -1, :], axis=-1)[:,None]
         list_tokens.append(token)
+        if processor.tokenizer.eos_token_id in token:
+            break
     list_tokens = mx.concatenate(list_tokens, axis=1)
 
     result = [processor.tokenizer.decode(i) for i in list_tokens.tolist()]
@@ -531,56 +574,6 @@ def quantize(from_path='phi3v', to_path='quantized_phi3v', q_group_size=64, q_bi
     with open(f"{to_path}/config.json", "w") as f:
         json.dump(vars(model_cfg)|{'quantized':quantization_config, 'sanitized':True}, f, indent=4)
     mx.save_safetensors(f'{to_path}/quantized_model.safetensors', quantized_weights)
-
-class TrainingCallback:
-    def __init__(self, lora_cfg, lr_schedule, sum_every=3):
-        self.lora_cfg = lora_cfg
-        self.adapter_path = lora_cfg['adapter_path']
-        self.lr_schedule = lr_schedule
-        self.sum_every = sum_every
-        self.current_step = 0
-        self.sum_loss = .0
-        self.best_loss = math.inf
-        self.train_log = {'step_i': [], 'step_loss': [], 'avg_i': [], 'avg_loss': []}
-        self.start_time = time.perf_counter()
-
-    def __call__(self, model, lvalue):
-        self.current_step += 1
-        step_loss = lvalue.item()
-        print(f'- Step loss at step {self.current_step}: {step_loss}')
-        self.train_log['step_i'].append(self.current_step)
-        self.train_log['step_loss'].append(step_loss)
-        self.sum_loss += step_loss
-        
-        if self.current_step % self.sum_every == 0:
-            avg_loss = self.sum_loss / self.sum_every
-            self.sum_loss = 0.0
-            self.train_log['avg_i'].append(self.current_step)
-            self.train_log['avg_loss'].append(avg_loss)
-            print(f'Avg loss at step {self.current_step}: {avg_loss}')
-            if avg_loss < self.best_loss:
-                self.best_loss = avg_loss
-                mx.save_safetensors(f'{self.adapter_path}/adapters.safetensors', dict(tree_flatten(model.trainable_parameters())))
-
-    def end_log(self):
-        train_log = self.train_log
-        train_log['train_time'] = time.perf_counter() - self.start_time
-        with open(f'{self.adapter_path}/adapter_config.json', "w") as f:
-            json.dump(self.lora_cfg, f, indent=4)
-        with open(f'{self.adapter_path}/adapter_train_log.json', "w") as f:
-            json.dump(train_log, f, indent=4)
-        fig, (ax1, ax2) = plt.subplots(2, 1)
-        ax1.plot(train_log['step_i'], train_log['step_loss'], color='b', alpha=0.5, label='Step Loss')
-        ax1.plot(train_log['avg_i'], train_log['avg_loss'], color='r', label='Avg Loss')
-        ax1.set_title('Training Loss Curves')
-        ax1.legend()
-        ax2.plot(self.lr_schedule)
-        ax2.ticklabel_format(axis='y', style='sci')
-        ax2.set_title('Learning Rate Schedule')
-        plt.tight_layout() 
-        fig.savefig(f'train_log.png')
-        print(f"Training log saved to {self.adapter_path}")
-        print(f"Total training time: {train_log['train_time']:.2f} seconds")
 
 def train_lora(lora_layers=5, lora_rank=16, epochs=10, lr=1e-4, warmup=.5, mask_ratios=[.0], adapter_path='adapters', dataset_path="JosefAlbers/akemiH_MedQA_Reason"): # or mask_ratios=[.0, .1, .3, .5]
     
@@ -681,6 +674,20 @@ def recall(dataset_path="JosefAlbers/akemiH_MedQA_Reason"):
     del model
     del processor
 
+def chat(prompt, images=None, use_chat_template=True, model_path='phi3v', use_quantized_cache=False, adapter_path=None, max_tokens=100, verbose=True):
+    if use_chat_template is True:
+        if isinstance(images, list):
+            images = [Image.open(requests.get(i, stream=True).raw) for i in images]
+        elif isinstance(images, str):
+            images = [Image.open(requests.get(images, stream=True).raw)]
+        img_prompt = '\n'.join([f'<|image_{i+1}|>' for i in range(len(images))]) + '\n' if images is not None else ''
+        prompt = [prompt] if isinstance(prompt, str) else prompt
+        prompt = [f"<|user|>\n{img_prompt}{i}<|end|>\n<|assistant|>\n" for i in prompt]
+    print(f'### Input Texts ###\n{"\n".join(prompt)}\n###    Images    ###\n{images}\n###    Output    ###') if verbose else None
+    prompt = prompt[0] if len(prompt) == 1 else prompt
+    generate(*load(model_path=model_path, use_quantized_cache=use_quantized_cache, adapter_path=adapter_path), prompt, images, max_tokens=max_tokens, verbose=verbose)
+
+
 """
 Examples:
 
@@ -688,13 +695,35 @@ quantize()
 train_lora()
 recall()
 
-model, processor = load() # `vanilla
-model, processor = load(model_path='quantized_phi3v') # `q_model
-model, processor = load(use_quantized_cache=True) # `q_cache
-model, processor = load(adapter_path='adapters') # `lora
-model, processor = load(model_path='quantized_phi3v', use_quantized_cache=True) # `q_model_cache
+chat([
+    "Write an executive summary for a communications business plan",                               # `multiple strings
+    "Write a resume.", 
+    "Write a mystery horror.",
+    "Write a Neurology ICU Admission Note."])
+chat("What is shown in the first image?", [ 
+    "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcTSyGT7IkhN12m2EnWGOoqxilYcwnnEWECm_A&s", # `multiple images
+    "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcSWWjEYFx5X88A7K4th2o_dNkQu9Ipk6q98sA&s",
+    "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcREhh6bTTDNosQrJvAN6LZmPG98k4dYdt14DA&s",
+])
+chat('Write a space opera.', model_path='quantized_phi3v')                                          # `single string
 
-generate(model, processor, "<|user|>\n<|image_1|>\nWhat is shown in this image?<|end|>\n<|assistant|>\n", [Image.open(requests.get("https://assets-c4akfrf5b4d3f4b7.z01.azurefd.net/assets/2024/04/BMDataViz_661fb89f3845e.png" , stream=True).raw)])
-generate(model, processor, "<|user|>Write a sci-fi thriller.<|end|>\n<|assistant|>\n")
-generate(model, processor, ["<|user|>Write an executive summary for a communications business plan<|end|>\n<|assistant|>\n", "<|user|>Write a resume.<|end|>\n<|assistant|>\n", "<|user|>Write a mystery horror.<|end|>\n<|assistant|>\n","<|user|>Write a Neurology ICU Admission Note.<|end|>\n<|assistant|>\n"])
+model, processor = load()                                                                           # `vanilla
+model, processor = load(model_path='quantized_phi3v')                                               # `q_model
+model, processor = load(use_quantized_cache=True)                                                   # `q_cache
+model, processor = load(adapter_path='adapters')                                                    # `lora
+model, processor = load(model_path='quantized_phi3v', use_quantized_cache=True)                     # `q_model_cache
+
+generate(model, processor, 
+    "<|user|>\n<|image_1|>\nWhat is shown in this image?<|end|>\n<|assistant|>\n", 
+    [Image.open(requests.get("https://assets-c4akfrf5b4d3f4b7.z01.azurefd.net/assets/2024/04/BMDataViz_661fb89f3845e.png" , stream=True).raw)]
+)
+generate(model, processor, 
+    "<|user|>Write a sci-fi thriller.<|end|>\n<|assistant|>\n"
+)
+generate(model, processor, [
+    "<|user|>Write an executive summary for a communications business plan<|end|>\n<|assistant|>\n", 
+    "<|user|>Write a resume.<|end|>\n<|assistant|>\n", 
+    "<|user|>Write a mystery horror.<|end|>\n<|assistant|>\n",
+    "<|user|>Write a Neurology ICU Admission Note.<|end|>\n<|assistant|>\n"]
+)
 """
