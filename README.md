@@ -5,9 +5,10 @@ This project brings the powerful phi-3-vision VLM to Apple's MLX framework, offe
 ## Key Features
 
 * **Su-scaled RoPE:** Implements Su-scaled Rotary Position Embeddings to manage sequences of up to 128K tokens.
-* **KV Cache Quantization:** Optimize inference for processing long contexts with minimal overhead (5.3s quantized vs 5.1s original).
 * **Batch Generation:** Accelerate inference by generating text for multiple prompts concurrently (71 tokens-per-sec batched vs 34 tokens-per-sec single)
+* **KV Cache Quantization:** Optimize inference for processing long contexts with minimal overhead (5.3s quantized vs 5.1s original).
 * **Model Quantization:** Reduce model size for faster loading and deployment (2.3GB quantized vs 8.5GB original).
+* **Chat Template:** Utilization of chat template for streamlining interactions with the model.
 * **LoRA Training:** Easily customize the model for specific tasks or datasets using LoRA.
 * **Benchmarking:** Quickly assess model performance on any dataset (WIP).
 
@@ -18,7 +19,7 @@ prompt = "<|user|>\n<|image_1|>\nWhat is shown in this image?<|end|>\n<|assistan
 images = [Image.open(requests.get("https://assets-c4akfrf5b4d3f4b7.z01.azurefd.net/assets/2024/04/BMDataViz_661fb89f3845e.png" , stream=True).raw)]
 ```
 
-**Image Captioning**
+### **Image Captioning**
 
 ```python
 model, processor = load()
@@ -33,7 +34,7 @@ Generation: 3.703 tokens-per-sec
 4.85s user 6.92s system 65% cpu 17.919 total
 ```
 
-**Cache Quantization**
+### **Cache Quantization**
 
 ```python
 model, processor = load(use_quantized_cache=True) # `q_cache
@@ -52,7 +53,7 @@ Generation: 6.266 tokens-per-sec
 9.59s user 5.20s system 74% cpu 19.881 total
 ```
 
-**Model Quantization**
+### **Model Quantization**
 
 ```python
 quantize(from_path='phi3v', to_path='quantized_phi3v', q_group_size=64, q_bits=4)
@@ -79,26 +80,7 @@ Generation: 34.353 tokens-per-sec
 4.44s user 3.41s system 132% cpu 5.909 total
 ```
 
-**Quantization of Both Model and Cache**
-
-```python
-model, processor = load(model_path='quantized_phi3v', use_quantized_cache=True) # `q_model_cache
-generate(model, processor, "<|user|>Write a sci-fi thriller.<|end|>\n<|assistant|>\n")
-```
-
-```zsh
-Title: The Quantum Heist
-
-In the year 2150, the world had advanced beyond anything anyone had ever imagined. Technology had advanced so far that people could communicate instantly, travel anywhere in the world in seconds, and even control machines with their minds. But with these advancements came a new threat - quantum computers.
-
-A group of hackers had managed to break into the world's most secure database, stealing billions of dollars in cryptoc
-
-Prompt: 63.946 tokens-per-sec
-Generation: 17.143 tokens-per-sec
-9.12s user 3.69s system 142% cpu 8.978 total
-```
-
-**Batched Generation**
+### **Batched Generation**
 
 ```python
 generate(model, processor, [
@@ -165,7 +147,30 @@ python 240524.py  5.22s user 4.06s system 113% cpu 8.179 total
 
 *(Paddings for each input prompt and their corresponding attention masks, and position IDs are properly handled by the `generate` function to ensure correct model behavior)*
 
-**LoRA Training**
+### **Chat Template**
+
+```python
+# Multiple text inputs
+chat([
+    "Write an executive summary for a communications business plan",                               
+    "Write a resume.", 
+    "Write a mystery horror.",
+    "Write a Neurology ICU Admission Note."])
+
+# Multiple image inputs
+chat("What is shown in the first image?", [ 
+    "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcTSyGT7IkhN12m2EnWGOoqxilYcwnnEWECm_A&s", 
+    "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcSWWjEYFx5X88A7K4th2o_dNkQu9Ipk6q98sA&s",
+    "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcREhh6bTTDNosQrJvAN6LZmPG98k4dYdt14DA&s",
+])
+
+# Single string input also allowed
+chat('Write a space opera.', model_path='quantized_phi3v')                                          
+```
+
+*(The `chat` function provides a user-friendly interface for interacting with the model.)*
+
+### **LoRA Training**
 
 ```python
 train_lora(lora_layers=5, lora_rank=16, epochs=10, lr=1e-4, warmup=.5, mask_ratios=[.0], adapter_path='adapters', dataset_path = "JosefAlbers/akemiH_MedQA_Reason")
@@ -177,7 +182,9 @@ train_lora(lora_layers=5, lora_rank=16, epochs=10, lr=1e-4, warmup=.5, mask_rati
 
 ![Alt text](assets/train_log.png)
 
-**LoRA Inference**
+*(The `train_lora` function includes an experimental 'mask_ratios' option to apply token-level dropout during training, for improved model robustness, faster convergence, and better generalization to out-of-sample examples)*
+
+### **LoRA Inference**
 
 ```python
 model, processor = load(adapter_path='adapters')
@@ -196,7 +203,7 @@ Generation: 7.697 tokens-per-sec
 4.50s user 5.61s system 58% cpu 17.360 total
 ```
 
-**Benchmarking (WIP)**
+### **Benchmarking (WIP)**
 
 ```python
 recall(dataset_path="JosefAlbers/akemiH_MedQA_Reason"):
@@ -269,31 +276,6 @@ Final Score: 0.6(6/10)
 13.16s user 10.00s system 40% cpu 57.670 total
 ```
 </pre></details><br>
-
-*(The `train_lora` function includes an experimental 'mask_ratios' option to apply token-level dropout during training, for improved model robustness, faster convergence, and better generalization to out-of-sample examples)*
-
-** Chat Template **
-
-```python
-# Multiple text inputs
-chat([
-    "Write an executive summary for a communications business plan",                               
-    "Write a resume.", 
-    "Write a mystery horror.",
-    "Write a Neurology ICU Admission Note."])
-
-# Multiple image inputs
-chat("What is shown in the first image?", [ 
-    "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcTSyGT7IkhN12m2EnWGOoqxilYcwnnEWECm_A&s", 
-    "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcSWWjEYFx5X88A7K4th2o_dNkQu9Ipk6q98sA&s",
-    "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcREhh6bTTDNosQrJvAN6LZmPG98k4dYdt14DA&s",
-])
-
-# Single string input also allowed
-chat('Write a space opera.', model_path='quantized_phi3v')                                          
-```
-
-*(The `chat` function provides a user-friendly interface for interacting with the model.)*
 
 ## Installation
 
