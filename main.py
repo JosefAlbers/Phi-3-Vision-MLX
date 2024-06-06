@@ -1,6 +1,4 @@
-import mlx.core as mx
-import mlx.nn as nn
-import numpy as np
+
 import math
 import json
 import glob
@@ -10,8 +8,14 @@ import requests
 import torch
 import datasets
 import random
+import subprocess
+import mlx.core as mx
+import mlx.nn as nn
+import numpy as np
 import mlx.optimizers as optim
 import matplotlib.pyplot as plt
+from io import BytesIO
+from pathlib import Path
 from huggingface_hub import snapshot_download
 from shutil import copy
 from mlx.utils import tree_flatten, tree_unflatten
@@ -395,7 +399,7 @@ class Phi3Attention(nn.Module):
             values = mx.concatenate([value_cache, values], axis=2)
         else:
             past_key_values_length = 0
-            queries, keys = self.rope(queries, keys, offset=0, pids=pids)
+            queries, keys = self.rope(queries, keys, offset=past_key_values_length, pids=pids)
         scores = (queries * self.scale) @ keys.transpose(0, 1, 3, 2)
         scores += _get_mask_4d(past_key_values_length, L, mask)
         scores = mx.softmax(scores, axis=-1)
@@ -498,6 +502,31 @@ class Phi3VProcessor:
                 "image_sizes": mx.array(image_sizes),
                 "positions": mx.array(positions)}
 
+def load_image(image_source): # copied from https://github.com/Blaizzy/mlx-vlm/blob/main/mlx_vlm/utils.py
+    if isinstance(image_source, BytesIO):
+        try:
+            return Image.open(image_source)
+        except IOError as e:
+            raise ValueError(f"Failed to load image from BytesIO with error: {e}")
+    elif image_source.startswith(("http://", "https://")):
+        try:
+            response = requests.get(image_source, stream=True)
+            response.raise_for_status()
+            return Image.open(response.raw)
+        except Exception as e:
+            raise ValueError(
+                f"Failed to load image from URL: {image_source} with error {e}"
+            )
+    elif Path(image_source).is_file():
+        try:
+            return Image.open(image_source)
+        except IOError as e:
+            raise ValueError(f"Failed to load image {image_source} with error: {e}")
+    else:
+        raise ValueError(
+            f"The image {image_source} must be a valid URL or existing file."
+        )
+
 def _get_cfg(json_path, **kwargs):
     try:
         with open(json_path, "r") as f:
@@ -526,7 +555,7 @@ def load(model_path='phi3v', adapter_path=None, **kwargs):
     model.eval()
     return model, Phi3VProcessor(model_path)
 
-def generate(model, processor, prompt, images=None, max_tokens=100, verbose=True, stream=False):
+def generate(model, processor, prompt, images=None, max_tokens=100, verbose=True, stream=False, return_cache=False):
     if images is not None and isinstance(prompt, list):
         raise ValueError('Images cannot be provided when prompt is a list')
     tic = time.perf_counter()
@@ -547,15 +576,17 @@ def generate(model, processor, prompt, images=None, max_tokens=100, verbose=True
     list_tokens = mx.concatenate(list_tokens, axis=1)
 
     result = [processor.tokenizer.decode(i) for i in list_tokens.tolist()]
-    for i, gen in enumerate(result):
-        print(f'\n< Generated text for prompt #{i} >') if len(result) > 1 else None
-        print(gen)
     if verbose:
+        for i, gen in enumerate(result):
+            print(f'\n< Generated text for prompt #{i} >') if len(result) > 1 else None
+            print(gen)
         gen_time = time.perf_counter() - tic
         prompt_tps =  dict_input['input_ids'].size / prompt_time
         gen_tps = (list_tokens.size - 1) / gen_time
         print(f"\nPrompt: {prompt_tps:.3f} tokens-per-sec")
         print(f"Generation: {gen_tps:.3f} tokens-per-sec")
+    if return_cache:
+        return result, cache
     return result
     
 def quantize(from_path='phi3v', to_path='quantized_phi3v', q_group_size=64, q_bits=4):
@@ -576,9 +607,6 @@ def quantize(from_path='phi3v', to_path='quantized_phi3v', q_group_size=64, q_bi
     mx.save_safetensors(f'{to_path}/quantized_model.safetensors', quantized_weights)
 
 def train_lora(lora_layers=5, lora_rank=16, epochs=10, lr=1e-4, warmup=.5, mask_ratios=[.0], adapter_path='adapters', dataset_path="JosefAlbers/akemiH_MedQA_Reason"): # or mask_ratios=[.0, .1, .3, .5]
-    
-    model, processor = load()
-
     def _prompt(example):
         _question = example['input'].rsplit(' A: ', 1)[0].strip()
         _summary = example['summary'].strip().split('\n', 1)[0].strip()
@@ -626,6 +654,11 @@ def train_lora(lora_layers=5, lora_rank=16, epochs=10, lr=1e-4, warmup=.5, mask_
         os.makedirs(adapter_path, exist_ok=True)
         return lora_cfg
 
+    def _get_lr_schedule(lr, steps, warmup):
+        n_warmup = int(steps*warmup)
+        return mx.concatenate([mx.linspace(1e-6, lr, n_warmup), mx.linspace(lr, 1e-6, steps - n_warmup + 1)[1:]])
+
+    model, processor = load()
     ds = datasets.load_dataset(dataset_path, split='train').take(10) # `debug
     ds = ds.map(_prompt).select_columns(['input_tokens', 'idx_assistant'])
     ds = datasets.concatenate_datasets([ds]*epochs)
@@ -635,9 +668,6 @@ def train_lora(lora_layers=5, lora_rank=16, epochs=10, lr=1e-4, warmup=.5, mask_
     linear_to_lora_layers(model, lora_cfg['lora_layers'], lora_cfg['lora_parameters'])
     model.train()
     distil_loss_value_and_grad = nn.value_and_grad(model, _loss)
-    def _get_lr_schedule(lr, steps, warmup):
-        n_warmup = int(steps*warmup)
-        return mx.concatenate([mx.linspace(1e-6, lr, n_warmup), mx.linspace(lr, 1e-6, steps - n_warmup + 1)[1:]])
     lr_schedule = _get_lr_schedule(lr, steps, warmup)
     callback = TrainingCallback(lora_cfg, lr_schedule)
     optimizer=optim.AdamW(learning_rate=lr_schedule[0])
@@ -657,15 +687,18 @@ def recall(dataset_path="JosefAlbers/akemiH_MedQA_Reason"):
     model, processor = load(adapter_path='adapters')
     def _recall(example):
         def _get_alphabet(text):
-            return "".join([char for char in text if char.isalpha()]).upper()[0]
+            try:
+                return "".join([char for char in text if char.isalpha()]).upper()[0]
+            except:
+                return ""
         question = example['input']
         _question = question.rsplit(' A: ', 1)[0].strip()
         prompt_recall = f"<|user|>\n{_question}<|end|>\n<|assistant|>"
-        example['recall'] = generate(model, processor, prompt_recall, max_tokens=30, verbose=False)
+        example['recall'] = generate(model, processor, prompt_recall, max_tokens=30, verbose=False)[0]
         prompt_answer = f"<|user|>\n{question}<|end|>\n<|assistant|>\nThe correct answer is"
-        example['attempt'] = _get_alphabet(generate(model, processor, prompt_answer, max_tokens=3, verbose=False))
+        example['attempt'] = _get_alphabet(generate(model, processor, prompt_answer, max_tokens=3, verbose=False)[0])
         _summary = example['summary'].strip().split('\n', 1)[0].strip()
-        example['result'] = f"Question: {_question}\n- Taught: {_summary}\n- Recall: {example['recall']}\n- Answer: {example['output']}\n- Attenmpt: {example['attempt']}\n- Correct: {example['output'] == example['attempt']}"
+        example['result'] = f"Question: {_question}\n- Taught: {_summary}\n- Recall: {example['recall']}\n- Answer: {example['output']}\n- Attempt: {example['attempt']}\n- Correct: {example['output'] == example['attempt']}"
         return example
     ds = datasets.load_dataset(dataset_path, split='train').take(10)
     ds = ds.map(_recall)
@@ -674,20 +707,62 @@ def recall(dataset_path="JosefAlbers/akemiH_MedQA_Reason"):
     del model
     del processor
 
-def chat(prompt, images=None, use_chat_template=True, model_path='phi3v', use_quantized_cache=False, adapter_path=None, max_tokens=100, verbose=True):
+def chat(prompt, images=None, use_chat_template=True, model_path='phi3v', use_quantized_cache=False, adapter_path=None, max_tokens=100, verbose=True, return_cache=False):
     if use_chat_template is True:
         if isinstance(images, list):
-            images = [Image.open(requests.get(i, stream=True).raw) for i in images]
+            images = [load_image(i) for i in images]
         elif isinstance(images, str):
-            images = [Image.open(requests.get(images, stream=True).raw)]
+            images = [load_image(images)]
         img_prompt = '\n'.join([f'<|image_{i+1}|>' for i in range(len(images))]) + '\n' if images is not None else ''
         prompt = [prompt] if isinstance(prompt, str) else prompt
         prompt = [f"<|user|>\n{img_prompt}{i}<|end|>\n<|assistant|>\n" for i in prompt]
-    print(f'### Input Texts ###\n{"\n".join(prompt)}\n###    Images    ###\n{images}\n###    Output    ###') if verbose else None
+    print(f'### Prompt ###\n{"\n".join(map(str.strip, prompt)).strip()}\n### Images ###\n{'\n'.join(map(str, images)) if images else "None"}\n### Output ###') if verbose else None
     prompt = prompt[0] if len(prompt) == 1 else prompt
-    generate(*load(model_path=model_path, use_quantized_cache=use_quantized_cache, adapter_path=adapter_path), prompt, images, max_tokens=max_tokens, verbose=verbose)
+    return generate(*load(model_path=model_path, use_quantized_cache=use_quantized_cache, adapter_path=adapter_path), prompt, images, max_tokens=max_tokens, return_cache=return_cache)
+
+class Agent: # [] use cache
+    def __init__(self):
+        self.chat_step = 0
+        self.list_chat = []
+        self.list_code = []
+        self.list_imgs = []
 
 
+    def __call__(self, prompt:str, model_path='phi3v', use_quantized_cache=False, adapter_path=None, max_tokens=500):
+        input_code, input_img = (self.list_code[-1], self.list_imgs[-1]) if self.chat_step > 0 else ('', None)
+        prompt = prompt+input_code
+        gen_text = chat(prompt, input_img, model_path=model_path, use_quantized_cache=use_quantized_cache, adapter_path=adapter_path, max_tokens=max_tokens, verbose = False)[0]
+        self.list_chat.append((prompt, gen_text))
+        code_string, draw_path = self.draw(gen_text, f'agent_{self.chat_step}.png')
+        self.list_code.append(f'\n\n```python\n{code_string}\n```\n')
+        self.list_imgs.append(draw_path)
+        self.chat_step+=1
+    
+    def end(self, show_history=True):
+        chat_log = {
+            'chat':self.list_chat,
+            'code':self.list_code,
+            'imgs':self.list_imgs,
+        }
+        with open(f'chat_log.json', "w") as f:
+            json.dump(chat_log, f, indent=4)
+        if show_history is True:
+            for i in range(len(self.list_chat)):
+                print(f'########### Step {i} ###########')
+                print(f'----------- Prompt -----------\n{self.list_chat[i][0]}')
+                print(f'----------- Output -----------\n{self.list_chat[i][1]}')
+
+    @staticmethod
+    def draw(code_string, draw_path='test_plot.png'):
+        code_string = '\n'.join(re.findall(r"```python\n(.*?)```", code_string, re.DOTALL))
+        code_return = re.sub(r"plt\.savefig\((.*?)\)", "plt.show()", code_string).strip()
+        code_to_run = code_return.replace("plt.show()", f"plt.savefig('{draw_path}')")
+        try:
+            exec(code_to_run)
+            return code_return, draw_path
+        except Exception as e:
+            self.end()
+            return code_string, str(e)
 """
 Examples:
 
@@ -696,7 +771,7 @@ train_lora()
 recall()
 
 chat([
-    "Write an executive summary for a communications business plan",                               # `multiple strings
+    "Write an executive summary for a communications business plan",                                # `multiple strings
     "Write a resume.", 
     "Write a mystery horror.",
     "Write a Neurology ICU Admission Note."])
@@ -726,4 +801,11 @@ generate(model, processor, [
     "<|user|>Write a mystery horror.<|end|>\n<|assistant|>\n",
     "<|user|>Write a Neurology ICU Admission Note.<|end|>\n<|assistant|>\n"]
 )
+
+agent = Agent()                                                                                      # `generate -> execute -> visual feedback
+agent('Plot sine wave.')
+agent('Add cosine wave to the plot.')
+agent.end()
 """
+
+

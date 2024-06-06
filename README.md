@@ -170,6 +170,17 @@ chat('Write a space opera.', model_path='quantized_phi3v')
 
 *(The `chat` function provides a user-friendly interface for interacting with the model.)*
 
+### **Visual Feedback**
+
+```python
+agent = Agent()
+agent('Plot sine wave.')
+agent('Add cosine wave to the plot.')
+agent.end()
+```
+
+*(VLM's understanding of both text and visuals enables interactive generation and modification of plots/images, opening up new possibilities for GUI development and data visualization.)*
+
 ### **LoRA Training**
 
 ```python
