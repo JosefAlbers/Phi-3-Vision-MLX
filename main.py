@@ -1,4 +1,3 @@
-
 import math
 import json
 import glob
@@ -23,6 +22,51 @@ from PIL import Image, ImageOps
 from types import SimpleNamespace
 from transformers import AutoTokenizer
 import time
+import logging
+logging.getLogger("transformers").setLevel(logging.ERROR)
+
+class Agent:
+    def __init__(self):
+        self.chat_step = 0
+        self.list_chat = []
+        self.list_code = []
+        self.list_imgs = []
+
+    def __call__(self, prompt:str, quantize_model=False, quantize_cache=False, adapter_path=None, max_tokens=500):
+        input_code, input_img = (self.list_code[-1], self.list_imgs[-1]) if self.chat_step > 0 else ('', None)
+        prompt = prompt+input_code
+        gen_text = chat(prompt, input_img, quantize_model=quantize_model, quantize_cache=quantize_cache, adapter_path=adapter_path, max_tokens=max_tokens, verbose = False)[0]
+        self.list_chat.append((prompt, gen_text))
+        code_string, draw_path = self.draw(gen_text, f'agent_{self.chat_step}.png')
+        self.list_code.append(f'\n\n```python\n{code_string}\n```\n')
+        self.list_imgs.append(draw_path)
+        self.chat_step+=1
+    
+    def end(self, show_history=True):
+        chat_log = {
+            'chat':self.list_chat,
+            'code':self.list_code,
+            'imgs':self.list_imgs,
+        }
+        with open(f'chat_log.json', "w") as f:
+            json.dump(chat_log, f, indent=4)
+        if show_history is True:
+            for i in range(len(self.list_chat)):
+                print(f'########### Step {i} ###########')
+                print(f'----------- Prompt -----------\n{self.list_chat[i][0]}')
+                print(f'----------- Output -----------\n{self.list_chat[i][1]}')
+
+    @staticmethod
+    def draw(code_string, draw_path='test_plot.png'):
+        code_string = '\n'.join(re.findall(r"```python\n(.*?)```", code_string, re.DOTALL))
+        code_return = re.sub(r"plt\.savefig\((.*?)\)", "plt.show()", code_string).strip()
+        code_to_run = code_return.replace("plt.show()", f"plt.savefig('{draw_path}')")
+        try:
+            exec(code_to_run)
+            return code_return, draw_path
+        except Exception as e:
+            self.end()
+            return code_string, str(e)
 
 class TrainingCallback:
     def __init__(self, lora_cfg, lr_schedule, sum_every=3):
@@ -123,19 +167,6 @@ class LoRALinear(nn.Module): # copied from mlx-examples (https://github.com/ml-e
         y = self.linear(x)
         z = (self.dropout(x) @ self.lora_a) @ self.lora_b
         return y + (self.scale * z).astype(x.dtype)
-
-def linear_to_lora_layers(model, lora_layers, config):
-    if isinstance(lora_layers, int):
-        lora_layers = model.layers[-lora_layers:]
-    elif isinstance(lora_layers, list):
-        lora_layers = [model.layers[i] for i in lora_layers]
-    else:
-        raise ValueError("Invalid type for lora_layers. Expected int (number of layers) or list (layer indices or names).")
-    def to_lora(layer):
-        return LoRALinear.from_linear( layer, r=config["rank"], alpha=config["alpha"], scale=config["scale"], dropout=config["dropout"])
-    for l in lora_layers:
-        lora_layers = [(k, to_lora(m)) for k, m in l.named_modules() if k == "self_attn.qkv_proj"]
-        l.update_modules(tree_unflatten(lora_layers))
 
 class ClipAttention(nn.Module):
     def __init__(self, dims, num_heads, bias=True):
@@ -322,49 +353,11 @@ class Phi3ImageEmbedding(nn.Module):
             idx += cnt
         return txt_embeds
 
-class Phi3SuScaledRotaryEmbedding:
-    def __init__(self, dim, config, **kwargs):
-        self.inv_freq_short = 1.0 / (mx.array(config.rope_scaling["short_factor"], dtype=mx.float32) * config.rope_theta**(mx.arange(0, dim, 2, dtype=mx.float32) / dim))
-        self.inv_freq_long = 1.0 / (mx.array(config.rope_scaling["long_factor"], dtype=mx.float32) * config.rope_theta**(mx.arange(0, dim, 2, dtype=mx.float32) / dim))
-        self.original_max_position_embeddings = config.original_max_position_embeddings
-        self.scaling_factor = math.sqrt(1 + math.log(config.max_position_embeddings / config.original_max_position_embeddings) / math.log(config.original_max_position_embeddings))
-
-    def _get_cos_sin(self, offset, L, pids):
-        def _get_pids(offset, L, pids):
-            if offset < 1:
-                return pids
-            return pids[:, -1][:, None] + offset - pids.shape[1] + 1 + mx.arange(L)[None, :]
-        position_ids = mx.arange(offset, offset+L, dtype=mx.float32)[None] if pids is None else _get_pids(offset, L, pids)
-        inv_freq = self.inv_freq_long if position_ids.max()+1 > self.original_max_position_embeddings else self.inv_freq_short
-        inv_freq_expanded = mx.repeat(inv_freq[None, :, None], position_ids.shape[0], axis=0)
-        position_ids_expanded = position_ids[:, None, :]
-        freqs = (inv_freq_expanded @ position_ids_expanded).transpose(0, 2, 1)  
-        emb = mx.concatenate([freqs, freqs], axis=-1)  
-        cos = mx.cos(emb) * self.scaling_factor
-        sin = mx.sin(emb) * self.scaling_factor
-        return mx.expand_dims(cos, axis=1), mx.expand_dims(sin, axis=1) 
-
-    def __call__(self, q, k=None, offset=0, pids=None):
-        def _rotate_half(x):
-            midpoint = x.shape[-1] // 2  
-            x1, x2 = x[..., :midpoint], x[..., midpoint:]  
-            return mx.concatenate([-x2, x1], axis = -1) 
-        cos, sin = self._get_cos_sin(offset, q.shape[2], pids)
-        return (q * cos) + (_rotate_half(q) * sin) if k is None else (q * cos) + (_rotate_half(q) * sin), (k * cos) + (_rotate_half(k) * sin)
-
-def _get_mask_4d(past_key_values_length, L, mask):
-    mask_4d = mx.triu(mx.full((L+past_key_values_length, L+past_key_values_length), -mx.inf), k=1)[None, None]
-    if mask is not None:
-        pad_len = L+past_key_values_length - mask.shape[-1]
-        mask = mx.pad(mask, ((0,0),(0,pad_len)), 1)
-        mask = mx.expand_dims(mask, (1,2))
-        mask = mask*mask.transpose(0,1,3,2)
-        mask = mx.where(mask==1, 0, -np.inf)
-        mask_4d += mask
-        mask_4d = mx.repeat(mask_4d, 32, axis=1)
-    mask_4d = mask_4d[:,:,past_key_values_length:,:]
-    return mask_4d
-
+def _rotate_half(x):
+    midpoint = x.shape[-1] // 2  
+    x1, x2 = x[..., :midpoint], x[..., midpoint:]  
+    return mx.concatenate([-x2, x1], axis = -1) 
+    
 class Phi3Attention(nn.Module):
     def __init__(self, config):
         super().__init__()
@@ -377,9 +370,8 @@ class Phi3Attention(nn.Module):
         op_size = n_heads * head_dim + 2 * (n_kv_heads * head_dim)
         self.qkv_proj = nn.Linear(dim, op_size, bias=False)
         self.o_proj = nn.Linear(n_heads * head_dim, dim, bias=False)
-        self.rope = Phi3SuScaledRotaryEmbedding(self.head_dim, config)
         self.use_quantized_cache=getattr(config, "use_quantized_cache", False)
-    def __call__(self, x, cache, pids=None, mask=None):
+    def __call__(self, x, cache, cos, sin, mask):
         B, L, D = x.shape
         qkv = self.qkv_proj(x)
         query_pos = self.n_heads * self.head_dim
@@ -393,15 +385,16 @@ class Phi3Attention(nn.Module):
                 value_cache = mx.dequantize(*cache[1], group_size=32).reshape((B, self.n_kv_heads, -1, self.head_dim))
             else:
                 key_cache, value_cache = cache
-            past_key_values_length = key_cache.shape[2]
-            queries, keys = self.rope(queries, keys, offset=past_key_values_length, pids=pids)
+            queries = (queries * cos) + (_rotate_half(queries) * sin)
+            keys = (keys * cos) + (_rotate_half(keys) * sin)
             keys = mx.concatenate([key_cache, keys], axis=2)
             values = mx.concatenate([value_cache, values], axis=2)
         else:
-            past_key_values_length = 0
-            queries, keys = self.rope(queries, keys, offset=past_key_values_length, pids=pids)
+            queries = (queries * cos) + (_rotate_half(queries) * sin)
+            keys = (keys * cos) + (_rotate_half(keys) * sin)
+
         scores = (queries * self.scale) @ keys.transpose(0, 1, 3, 2)
-        scores += _get_mask_4d(past_key_values_length, L, mask)
+        scores += mask
         scores = mx.softmax(scores, axis=-1)
         output = scores @ values
         output = output.transpose(0, 2, 1, 3).reshape(B, L, -1)
@@ -429,11 +422,54 @@ class Phi3DecoderLayer(nn.Module):
         self.input_layernorm = nn.RMSNorm(config.hidden_size, eps=config.rms_norm_eps)
         self.post_attention_layernorm = nn.RMSNorm(config.hidden_size, eps=config.rms_norm_eps)
 
-    def __call__(self, x, cache, pids, mask):
-        r, cache = self.self_attn(self.input_layernorm(x), cache, pids, mask)
+    def __call__(self, x, cache, cos, sin, mask):
+        r, cache = self.self_attn(self.input_layernorm(x), cache, cos, sin, mask)
         h = x + r
         r = self.mlp(self.post_attention_layernorm(h))
         return h + r, cache
+
+def _get_past_L(cache, quantized):
+    if cache is None:
+        return 0
+    if quantized:
+        return mx.dequantize(*cache[0][0], group_size=32).shape[1] // 96
+    return cache[0][0].shape[2]
+
+def _get_mask_4d(past_key_values_length, L, mask):
+    mask_4d = mx.triu(mx.full((L+past_key_values_length, L+past_key_values_length), -mx.inf), k=1)[None, None]
+    if mask is not None:
+        pad_len = L+past_key_values_length - mask.shape[-1]
+        mask = mx.pad(mask, ((0,0),(0,pad_len)), 1)
+        mask = mx.expand_dims(mask, (1,2))
+        mask = mask*mask.transpose(0,1,3,2)
+        mask = mx.where(mask==1, 0, -np.inf)
+        mask_4d += mask
+        mask_4d = mx.repeat(mask_4d, 32, axis=1)
+    mask_4d = mask_4d[:,:,past_key_values_length:,:]
+    return mask_4d
+
+class Phi3SuScaledRotaryEmbedding:
+    def __init__(self, config, **kwargs):
+        dim = config.hidden_size // config.num_attention_heads
+        self.inv_freq_short = 1.0 / (mx.array(config.rope_scaling["short_factor"], dtype=mx.float32) * config.rope_theta**(mx.arange(0, dim, 2, dtype=mx.float32) / dim))
+        self.inv_freq_long = 1.0 / (mx.array(config.rope_scaling["long_factor"], dtype=mx.float32) * config.rope_theta**(mx.arange(0, dim, 2, dtype=mx.float32) / dim))
+        self.original_max_position_embeddings = config.original_max_position_embeddings
+        self.scaling_factor = math.sqrt(1 + math.log(config.max_position_embeddings / config.original_max_position_embeddings) / math.log(config.original_max_position_embeddings))
+
+    def __call__(self, past_L, new_L, pids):
+        def _get_pids(past_L, new_L, pids):
+            if past_L < 1:
+                return pids
+            return pids[:, -1][:, None] + past_L - pids.shape[1] + 1 + mx.arange(new_L)[None, :]
+        position_ids = mx.arange(past_L, past_L+new_L, dtype=mx.float32)[None] if pids is None else _get_pids(past_L, new_L, pids)
+        inv_freq = self.inv_freq_long if position_ids.max()+1 > self.original_max_position_embeddings else self.inv_freq_short
+        inv_freq_expanded = mx.repeat(inv_freq[None, :, None], position_ids.shape[0], axis=0)
+        position_ids_expanded = position_ids[:, None, :]
+        freqs = (inv_freq_expanded @ position_ids_expanded).transpose(0, 2, 1)  
+        emb = mx.concatenate([freqs, freqs], axis=-1)  
+        cos = mx.cos(emb) * self.scaling_factor
+        sin = mx.sin(emb) * self.scaling_factor
+        return mx.expand_dims(cos, axis=1), mx.expand_dims(sin, axis=1) 
 
 class Phi3VModel(nn.Module):
     def __init__(self, config):
@@ -442,13 +478,18 @@ class Phi3VModel(nn.Module):
         self.vision_embed_tokens = Phi3ImageEmbedding(config)
         self.layers = [Phi3DecoderLayer(config) for _ in range(config.num_hidden_layers)]
         self.norm = nn.RMSNorm(config.hidden_size, eps=config.rms_norm_eps)
+        self.use_quantized_cache= getattr(config, "use_quantized_cache", False)
+        self.rope = Phi3SuScaledRotaryEmbedding(config)
     def __call__(self, input_ids, pixel_values, image_sizes, positions, cache, pids, mask):
         x = self.embed_tokens(input_ids)
         if pixel_values is not None:
             x = self.vision_embed_tokens(x, pixel_values, image_sizes, positions)
+        past_L = _get_past_L(cache, quantized=self.use_quantized_cache)
+        mask_4d = _get_mask_4d(past_L, x.shape[1], mask)
+        cos, sin = self.rope(past_L, x.shape[1], pids)
         cache = [None] * len(self.layers) if cache is None else cache
         for i, l in enumerate(self.layers):
-            x, cache[i] = l(x, cache[i], pids, mask)
+            x, cache[i] = l(x, cache[i], cos, sin, mask_4d)
         return self.norm(x), cache
 
 class Phi3VLModel(nn.Module):
@@ -502,7 +543,20 @@ class Phi3VProcessor:
                 "image_sizes": mx.array(image_sizes),
                 "positions": mx.array(positions)}
 
-def load_image(image_source): # copied from https://github.com/Blaizzy/mlx-vlm/blob/main/mlx_vlm/utils.py
+def _linear_to_lora_layers(model, lora_layers, config):
+    if isinstance(lora_layers, int):
+        lora_layers = model.layers[-lora_layers:]
+    elif isinstance(lora_layers, list):
+        lora_layers = [model.layers[i] for i in lora_layers]
+    else:
+        raise ValueError("Invalid type for lora_layers. Expected int (number of layers) or list (layer indices or names).")
+    def to_lora(layer):
+        return LoRALinear.from_linear( layer, r=config["rank"], alpha=config["alpha"], scale=config["scale"], dropout=config["dropout"])
+    for l in lora_layers:
+        lora_layers = [(k, to_lora(m)) for k, m in l.named_modules() if k == "self_attn.qkv_proj"]
+        l.update_modules(tree_unflatten(lora_layers))
+
+def _load_image(image_source): # copied from https://github.com/Blaizzy/mlx-vlm/blob/main/mlx_vlm/utils.py
     if isinstance(image_source, BytesIO):
         try:
             return Image.open(image_source)
@@ -549,13 +603,13 @@ def load(model_path='phi3v', adapter_path=None, **kwargs):
     model.load_weights(_get_wt(model_path, model_cfg))
     if adapter_path:
         lora_cfg = _get_cfg(f"{adapter_path}/adapter_config.json")
-        linear_to_lora_layers(model, lora_cfg.lora_layers, lora_cfg.lora_parameters)
+        _linear_to_lora_layers(model, lora_cfg.lora_layers, lora_cfg.lora_parameters)
         model.load_weights(f'{adapter_path}/adapters.safetensors', strict=False)
     mx.eval(model.parameters())
     model.eval()
     return model, Phi3VProcessor(model_path)
 
-def generate(model, processor, prompt, images=None, max_tokens=100, verbose=True, stream=False, return_cache=False):
+def generate(model, processor, prompt, images=None, max_tokens=100, verbose=True, return_tps=False):
     if images is not None and isinstance(prompt, list):
         raise ValueError('Images cannot be provided when prompt is a list')
     tic = time.perf_counter()
@@ -585,8 +639,10 @@ def generate(model, processor, prompt, images=None, max_tokens=100, verbose=True
         gen_tps = (list_tokens.size - 1) / gen_time
         print(f"\nPrompt: {prompt_tps:.3f} tokens-per-sec")
         print(f"Generation: {gen_tps:.3f} tokens-per-sec")
-    if return_cache:
-        return result, cache
+    # if return_cache:
+    #     return result, cache
+    if return_tps:
+        return prompt_tps, gen_tps
     return result
     
 def quantize(from_path='phi3v', to_path='quantized_phi3v', q_group_size=64, q_bits=4):
@@ -665,7 +721,7 @@ def train_lora(lora_layers=5, lora_rank=16, epochs=10, lr=1e-4, warmup=.5, mask_
     steps = len(ds)
     lora_cfg = _set_lora(lora_layers, lora_rank, adapter_path)
     model.freeze()    
-    linear_to_lora_layers(model, lora_cfg['lora_layers'], lora_cfg['lora_parameters'])
+    _linear_to_lora_layers(model, lora_cfg['lora_layers'], lora_cfg['lora_parameters'])
     model.train()
     distil_loss_value_and_grad = nn.value_and_grad(model, _loss)
     lr_schedule = _get_lr_schedule(lr, steps, warmup)
@@ -685,12 +741,12 @@ def train_lora(lora_layers=5, lora_rank=16, epochs=10, lr=1e-4, warmup=.5, mask_
 
 def recall(dataset_path="JosefAlbers/akemiH_MedQA_Reason"):
     model, processor = load(adapter_path='adapters')
+    def _get_alphabet(text):
+        try:
+            return "".join([char for char in text if char.isalpha()]).upper()[0]
+        except:
+            return ""
     def _recall(example):
-        def _get_alphabet(text):
-            try:
-                return "".join([char for char in text if char.isalpha()]).upper()[0]
-            except:
-                return ""
         question = example['input']
         _question = question.rsplit(' A: ', 1)[0].strip()
         prompt_recall = f"<|user|>\n{_question}<|end|>\n<|assistant|>"
@@ -707,87 +763,98 @@ def recall(dataset_path="JosefAlbers/akemiH_MedQA_Reason"):
     del model
     del processor
 
-def chat(prompt, images=None, use_chat_template=True, model_path='phi3v', use_quantized_cache=False, adapter_path=None, max_tokens=100, verbose=True, return_cache=False):
-    if use_chat_template is True:
-        if isinstance(images, list):
-            images = [load_image(i) for i in images]
-        elif isinstance(images, str):
-            images = [load_image(images)]
-        img_prompt = '\n'.join([f'<|image_{i+1}|>' for i in range(len(images))]) + '\n' if images is not None else ''
-        prompt = [prompt] if isinstance(prompt, str) else prompt
-        prompt = [f"<|user|>\n{img_prompt}{i}<|end|>\n<|assistant|>\n" for i in prompt]
+def chat(prompt, images=None, quantize_model=False, quantize_cache=False, adapter_path=None, max_tokens=100, verbose=True, return_tps=False):
+    if (quantize_model is True) and (not os.path.exists('quantized_phi3v')):
+        quantize()
+    if images is not None:
+        images = [_load_image(i) for i in images] if isinstance(images, list) else [_load_image(images)]
+        img_prompt = '\n'.join([f'<|image_{i+1}|>' for i in range(len(images))]) + '\n'
+    else:
+        img_prompt = ''
+    prompt = [prompt] if isinstance(prompt, str) else prompt
+    prompt = [f"<|user|>\n{img_prompt}{i}<|end|>\n<|assistant|>\n" for i in prompt]
     print(f'### Prompt ###\n{"\n".join(map(str.strip, prompt)).strip()}\n### Images ###\n{'\n'.join(map(str, images)) if images else "None"}\n### Output ###') if verbose else None
     prompt = prompt[0] if len(prompt) == 1 else prompt
-    return generate(*load(model_path=model_path, use_quantized_cache=use_quantized_cache, adapter_path=adapter_path), prompt, images, max_tokens=max_tokens, return_cache=return_cache)
+    model_path='quantized_phi3v' if quantize_model is True else 'phi3v'
+    return generate(*load(model_path=model_path, use_quantized_cache=quantize_cache, adapter_path=adapter_path), prompt, images, max_tokens=max_tokens, verbose=verbose, return_tps=return_tps)
 
-class Agent: # [] use cache
-    def __init__(self):
-        self.chat_step = 0
-        self.list_chat = []
-        self.list_code = []
-        self.list_imgs = []
+def benchmark():
+    prompts = [
+        ('Write a space opera.', ),
+        ('What is shown in this image?', 'https://assets-c4akfrf5b4d3f4b7.z01.azurefd.net/assets/2024/04/BMDataViz_661fb89f3845e.png'),
+        ([
+            "Write an executive summary for a communications business plan",
+            "Write a resume.", 
+            "Write a mystery horror.",
+            "Write a Neurology ICU Admission Note."
+            ], None),
+        ("What is shown in the first image?", [
+            "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcTSyGT7IkhN12m2EnWGOoqxilYcwnnEWECm_A&s",
+            "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcSWWjEYFx5X88A7K4th2o_dNkQu9Ipk6q98sA&s",
+            "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcREhh6bTTDNosQrJvAN6LZmPG98k4dYdt14DA&s",
+            ]),
+    ]
+    results = {
+        'vanilla': [],
+        'q_model': [],
+        'q_cache': [],
+        'lora': [],
+    }
 
+    for i, prompt in enumerate(prompts):
+        for method in results:
+            kwargs = {'return_tps': True}
+            if method == 'q_model':
+                kwargs['quantize_model'] = True
+            elif method == 'q_cache':
+                kwargs['quantize_cache'] = True
+            elif method == 'lora':
+                kwargs['adapter_path'] = 'adapters'
 
-    def __call__(self, prompt:str, model_path='phi3v', use_quantized_cache=False, adapter_path=None, max_tokens=500):
-        input_code, input_img = (self.list_code[-1], self.list_imgs[-1]) if self.chat_step > 0 else ('', None)
-        prompt = prompt+input_code
-        gen_text = chat(prompt, input_img, model_path=model_path, use_quantized_cache=use_quantized_cache, adapter_path=adapter_path, max_tokens=max_tokens, verbose = False)[0]
-        self.list_chat.append((prompt, gen_text))
-        code_string, draw_path = self.draw(gen_text, f'agent_{self.chat_step}.png')
-        self.list_code.append(f'\n\n```python\n{code_string}\n```\n')
-        self.list_imgs.append(draw_path)
-        self.chat_step+=1
-    
-    def end(self, show_history=True):
-        chat_log = {
-            'chat':self.list_chat,
-            'code':self.list_code,
-            'imgs':self.list_imgs,
-        }
-        with open(f'chat_log.json', "w") as f:
-            json.dump(chat_log, f, indent=4)
-        if show_history is True:
-            for i in range(len(self.list_chat)):
-                print(f'########### Step {i} ###########')
-                print(f'----------- Prompt -----------\n{self.list_chat[i][0]}')
-                print(f'----------- Output -----------\n{self.list_chat[i][1]}')
+            prompt_tps, gen_tps = chat(*prompt, **kwargs)
+            results[method].append([i, prompt_tps, gen_tps])
 
-    @staticmethod
-    def draw(code_string, draw_path='test_plot.png'):
-        code_string = '\n'.join(re.findall(r"```python\n(.*?)```", code_string, re.DOTALL))
-        code_return = re.sub(r"plt\.savefig\((.*?)\)", "plt.show()", code_string).strip()
-        code_to_run = code_return.replace("plt.show()", f"plt.savefig('{draw_path}')")
-        try:
-            exec(code_to_run)
-            return code_return, draw_path
-        except Exception as e:
-            self.end()
-            return code_string, str(e)
+    with open('benchmark.json', 'w') as f:
+        json.dump(results, f, indent=4)
+
 """
 Examples:
 
-quantize()
+# `chat
+chat('Write a space opera.') 
+chat('What is shown in this image?', 
+    'https://assets-c4akfrf5b4d3f4b7.z01.azurefd.net/assets/2024/04/BMDataViz_661fb89f3845e.png')
+chat([
+    "Write an executive summary for a communications business plan",
+    "Write a resume.", 
+    "Write a mystery horror.",
+    "Write a Neurology ICU Admission Note.",])
+chat("What is shown in the first image?", [ 
+    "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcTSyGT7IkhN12m2EnWGOoqxilYcwnnEWECm_A&s",
+    "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcSWWjEYFx5X88A7K4th2o_dNkQu9Ipk6q98sA&s",
+    "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcREhh6bTTDNosQrJvAN6LZmPG98k4dYdt14DA&s",])
+
+# `quantize model/cache
+chat('Write a space opera.', quantize_model=True, quantize_cache=True) 
+
+# `generate -> execute -> visual feedback
+agent = Agent()
+agent('Plot sine wave.')
+agent('Modify the code to add cosine wave to the plot.')
+agent.end()
+
+# `lora
 train_lora()
 recall()
 
-chat([
-    "Write an executive summary for a communications business plan",                                # `multiple strings
-    "Write a resume.", 
-    "Write a mystery horror.",
-    "Write a Neurology ICU Admission Note."])
-chat("What is shown in the first image?", [ 
-    "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcTSyGT7IkhN12m2EnWGOoqxilYcwnnEWECm_A&s", # `multiple images
-    "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcSWWjEYFx5X88A7K4th2o_dNkQu9Ipk6q98sA&s",
-    "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcREhh6bTTDNosQrJvAN6LZmPG98k4dYdt14DA&s",
-])
-chat('Write a space opera.', model_path='quantized_phi3v')                                          # `single string
-
+# `load
 model, processor = load()                                                                           # `vanilla
 model, processor = load(model_path='quantized_phi3v')                                               # `q_model
 model, processor = load(use_quantized_cache=True)                                                   # `q_cache
 model, processor = load(adapter_path='adapters')                                                    # `lora
 model, processor = load(model_path='quantized_phi3v', use_quantized_cache=True)                     # `q_model_cache
 
+# `generate
 generate(model, processor, 
     "<|user|>\n<|image_1|>\nWhat is shown in this image?<|end|>\n<|assistant|>\n", 
     [Image.open(requests.get("https://assets-c4akfrf5b4d3f4b7.z01.azurefd.net/assets/2024/04/BMDataViz_661fb89f3845e.png" , stream=True).raw)]
@@ -801,11 +868,4 @@ generate(model, processor, [
     "<|user|>Write a mystery horror.<|end|>\n<|assistant|>\n",
     "<|user|>Write a Neurology ICU Admission Note.<|end|>\n<|assistant|>\n"]
 )
-
-agent = Agent()                                                                                      # `generate -> execute -> visual feedback
-agent('Plot sine wave.')
-agent('Add cosine wave to the plot.')
-agent.end()
 """
-
-

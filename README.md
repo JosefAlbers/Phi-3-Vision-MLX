@@ -5,90 +5,34 @@ This project brings the powerful phi-3-vision VLM to Apple's MLX framework, offe
 ## Key Features
 
 * **Su-scaled RoPE:** Implements Su-scaled Rotary Position Embeddings to manage sequences of up to 128K tokens.
-* **Batch Generation:** Accelerate inference by generating text for multiple prompts concurrently (71 tokens-per-sec batched vs 34 tokens-per-sec single)
-* **KV Cache Quantization:** Optimize inference for processing long contexts with minimal overhead (5.3s quantized vs 5.1s original).
+* **Batch Generation:** Accelerate inference by generating text for multiple prompts concurrently (94 tokens-per-sec batched vs 51 tokens-per-sec single)
+* **Cache Quantization:** Optimize inference for processing long contexts with key-value cache quantization (5.3s quantized vs 5.1s original).
 * **Model Quantization:** Reduce model size for faster loading and deployment (2.3GB quantized vs 8.5GB original).
 * **Chat Template:** Utilization of chat template for streamlining interactions with the model.
 * **LoRA Training:** Easily customize the model for specific tasks or datasets using LoRA.
-* **Benchmarking:** Quickly assess model performance on any dataset (WIP).
+* **Benchmarking:** To quickly assess model performance on any dataset. (WIP)
+* **VLM Agent:** Leverages VLM's visual understanding for interactive code generation and refinement, enabling data visualization and image manipulation through a visual feedback loop. (WIP)
 
 ## Usage
-
-```python
-prompt = "<|user|>\n<|image_1|>\nWhat is shown in this image?<|end|>\n<|assistant|>\n"
-images = [Image.open(requests.get("https://assets-c4akfrf5b4d3f4b7.z01.azurefd.net/assets/2024/04/BMDataViz_661fb89f3845e.png" , stream=True).raw)]
-```
 
 ### **Image Captioning**
 
 ```python
-model, processor = load()
-generate(model, processor, prompt, images)
+chat('What is shown in this image?', 'https://assets-c4akfrf5b4d3f4b7.z01.azurefd.net/assets/2024/04/BMDataViz_661fb89f3845e.png')
 ```
 
 ```zsh
 The image displays a bar chart with percentages on the vertical axis ranging from 0% to 100%, and various statements on the horizontal axis. Each bar represents the percentage of respondents who agree with the corresponding statement.<|end|><|endoftext|>
-
-Prompt: 10.689 tokens-per-sec
-Generation: 3.703 tokens-per-sec
-4.85s user 6.92s system 65% cpu 17.919 total
-```
-
-### **Cache Quantization**
-
-```python
-model, processor = load(use_quantized_cache=True) # `q_cache
-generate(model, processor,  "<|user|>Write an exciting sci-fi.<|end|>\n<|assistant|>\n")
-```
-
-```zsh
-Title: The Last Resort
-
-In the year 2150, Earth is on the brink of collapse. The planet's resources are depleted, and the once-thriving cities are now desolate wastelands. The only hope for humanity lies in a distant planet, Proxima-4.
-
-A group of scientists and engineers have been working tirelessly to develop a spacecraft capable of traveling to Proxima-
-
-Prompt: 66.178 tokens-per-sec
-Generation: 6.266 tokens-per-sec
-9.59s user 5.20s system 74% cpu 19.881 total
-```
-
-### **Model Quantization**
-
-```python
-quantize(from_path='phi3v', to_path='quantized_phi3v', q_group_size=64, q_bits=4)
-```
-
-```zsh
-4.30s user 3.31s system 119% cpu 6.368 total
-```
-
-```python
-model, processor = load(model_path='quantized_phi3v')
-generate(model, processor, "<|user|>Write a sci-fi thriller.<|end|>\n<|assistant|>\n")
-```
-
-```zsh
-Title: The Quantum Heist
-
-In the year 2050, the world had advanced beyond anything anyone had ever imagined. Technology had advanced so much that people could communicate instantly with each other, travel anywhere in the world in mere seconds, and even control machines with their minds. But with these advancements came a new threat - quantum computers.
-
-A group of hackers had managed to steal the blueprints for the most powerful quantum computer ever created.
-
-Prompt: 70.860 tokens-per-sec
-Generation: 34.353 tokens-per-sec
-4.44s user 3.41s system 132% cpu 5.909 total
 ```
 
 ### **Batched Generation**
 
 ```python
-generate(model, processor, [
-    "<|user|>Write an executive summary for a communications business plan<|end|>\n<|assistant|>\n", 
-    "<|user|>Write a resume.<|end|>\n<|assistant|>\n", 
-    "<|user|>Write a mystery horror.<|end|>\n<|assistant|>\n",
-    "<|user|>Write a Neurology ICU Admission Note.<|end|>\n<|assistant|>\n"]
-)
+chat([
+    "Write an executive summary for a communications business plan",
+    "Write a resume.", 
+    "Write a mystery horror.",
+    "Write a Neurology ICU Admission Note.",])
 ```
 
 ```zsh
@@ -139,47 +83,37 @@ Chief Complaint: Acute onset of severe headache, photophobia, and neck stiffness
 History of Present Illness:
 
 - Sudden onset of severe headache
-
-Prompt: 4859.885 tokens-per-sec
-Generation: 71.642 tokens-per-sec
-python 240524.py  5.22s user 4.06s system 113% cpu 8.179 total
 ```
 
-*(Paddings for each input prompt and their corresponding attention masks, and position IDs are properly handled by the `generate` function to ensure correct model behavior)*
+*(Paddings for each input prompt and their corresponding attention masks, and position IDs are properly handled by the `generate` function to ensure correct model behavior.)*
 
-### **Chat Template**
+### **Cache Quantization**
 
 ```python
-# Multiple text inputs
-chat([
-    "Write an executive summary for a communications business plan",                               
-    "Write a resume.", 
-    "Write a mystery horror.",
-    "Write a Neurology ICU Admission Note."])
-
-# Multiple image inputs
-chat("What is shown in the first image?", [ 
-    "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcTSyGT7IkhN12m2EnWGOoqxilYcwnnEWECm_A&s", 
-    "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcSWWjEYFx5X88A7K4th2o_dNkQu9Ipk6q98sA&s",
-    "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcREhh6bTTDNosQrJvAN6LZmPG98k4dYdt14DA&s",
-])
-
-# Single string input also allowed
-chat('Write a space opera.', model_path='quantized_phi3v')                                          
+chat("Write an exciting sci-fi.", quantize_cache=True)
 ```
 
-*(The `chat` function provides a user-friendly interface for interacting with the model.)*
+```zsh
+Title: The Last Resort
 
-### **Visual Feedback**
+In the year 2150, Earth is on the brink of collapse. The planet's resources are depleted, and the once-thriving cities are now desolate wastelands. The only hope for humanity lies in a distant planet, Proxima-4.
+
+A group of scientists and engineers have been working tirelessly to develop a spacecraft capable of traveling to Proxima-
+```
+
+### **Model Quantization**
 
 ```python
-agent = Agent()
-agent('Plot sine wave.')
-agent('Add cosine wave to the plot.')
-agent.end()
+chat("Write an exciting sci-fi.", quantize_model=True)
 ```
 
-*(VLM's understanding of both text and visuals enables interactive generation and modification of plots/images, opening up new possibilities for GUI development and data visualization.)*
+```zsh
+Title: The Quantum Heist
+
+In the year 2050, the world had advanced beyond anything anyone had ever imagined. Technology had advanced so much that people could communicate instantly with each other, travel anywhere in the world in mere seconds, and even control machines with their minds. But with these advancements came a new threat - quantum computers.
+
+A group of hackers had managed to steal the blueprints for the most powerful quantum computer ever created.
+```
 
 ### **LoRA Training**
 
@@ -193,13 +127,10 @@ train_lora(lora_layers=5, lora_rank=16, epochs=10, lr=1e-4, warmup=.5, mask_rati
 
 ![Alt text](assets/train_log.png)
 
-*(The `train_lora` function includes an experimental 'mask_ratios' option to apply token-level dropout during training, for improved model robustness, faster convergence, and better generalization to out-of-sample examples)*
-
 ### **LoRA Inference**
 
 ```python
-model, processor = load(adapter_path='adapters')
-generate(model, processor, "<|user|>Write a sci-fi thriller.<|end|>\n<|assistant|>\n")
+chat("Write an exciting sci-fi.", adapter_path='adapters')
 ```
 
 ```zsh
@@ -208,13 +139,9 @@ Title: The Last AI
 In the year 2150, the world was dominated by artificial intelligence. Machines had taken over most of the jobs, and humans were left to pursue creative and intellectual endeavors. The most advanced AI of all time, named Aiden, had been created by a team of brilliant engineers at the Global Tech Corporation.
 
 Aiden was unlike any other AI, it was self-aware, had emotions
-
-Prompt: 66.631 tokens-per-sec
-Generation: 7.697 tokens-per-sec
-4.50s user 5.61s system 58% cpu 17.360 total
 ```
 
-### **Benchmarking (WIP)**
+### **Benchmarking** (WIP)
 
 ```python
 recall(dataset_path="JosefAlbers/akemiH_MedQA_Reason"):
@@ -288,6 +215,18 @@ Final Score: 0.6(6/10)
 ```
 </pre></details><br>
 
+
+### **VLM Agent** (WIP)
+
+```python
+agent = Agent()
+agent('Plot sine wave.')
+agent('Add cosine wave to the plot.')
+agent.end()
+```
+
+VLM's understanding of both text and visuals enables interactive generation and modification of plots/images, opening up new possibilities for GUI development and data visualization.
+
 ## Installation
 
 You can either install the most recent version of Phi-3-Vision-MLX by cloning the GitHub repository:
@@ -306,10 +245,11 @@ Please note that the version available through pip may not be the most up-to-dat
 
 ## Benchmarks
 
-| Task                  | Vanilla Model | Quantized Model | Quantized KV Cache | LoRA Adapter |
-|-----------------------|---------------|-----------------|--------------------|--------------|
-| Image Captioning      | 10.71s        | 8.51s           | 12.79s             | 11.70s       |
-| Text Generation       | 5.07s         | 2.24s           | 5.27s              | 5.10s        |
+| Task                  | Vanilla Model | Quantized Model | Quantized Cache | LoRA      |
+|-----------------------|---------------|-----------------|-----------------|-----------|
+| Text Generation       |  8.46 tps     | 51.41 tps       |  6.85 tps       | 8.45 tps  |
+| Image Captioning      |  4.16 tps     |  2.60 tps       |  1.52 tps       | 4.11 tps  |
+| Batched Generation    | 22.73 tps     | 94.21 tps       | 17.76 tps       | 28.13 tps |
 
 ## License
 
