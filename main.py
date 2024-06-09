@@ -354,11 +354,38 @@ class Phi3ImageEmbedding(nn.Module):
         return txt_embeds
 
 @mx.compile
-def _rotate_half(x):
+def _rotate_half(x, cos, sin):
     midpoint = x.shape[-1] // 2  
-    x1, x2 = x[..., :midpoint], x[..., midpoint:]  
-    return mx.concatenate([-x2, x1], axis = -1) 
-    
+    x1, x2 = x[..., :midpoint], x[..., midpoint:]
+    return (x * cos) + (mx.concatenate([-x2, x1], axis = -1) * sin)
+
+class KVCache:
+    def __init__(self, config, x, max_tokens):
+        self.use_quantized_cache = getattr(config, "use_quantized_cache", False)
+        self.offset = 0
+        shape = (2, x.shape[0], config.num_key_value_heads, x.shape[1]+max_tokens, config.hidden_size // config.num_key_value_heads)
+        if self.use_quantized_cache:
+            self.kv = None
+        else:
+            self.kv = mx.zeros(shape, mx.float32)
+    def __call__(self, keys, values):
+        B, N, L, D = keys.shape
+        new_offset = self.offset + L
+        if self.use_quantized_cache: 
+            if self.kv is not None:
+                k_cache = mx.dequantize(*self.kv[0], group_size=32).reshape((B, N, -1, D))
+                v_cache = mx.dequantize(*self.kv[1], group_size=32).reshape((B, N, -1, D))
+                keys = mx.concatenate([k_cache, keys], axis=2)
+                values = mx.concatenate([v_cache, values], axis=2)
+            self.kv = (mx.quantize(keys.reshape((B*N,-1)), group_size=32), mx.quantize(values.reshape((B*N,-1)), group_size=32))
+            self.offset = new_offset
+            return keys, values
+        else:
+            self.kv[0,:,:,self.offset:new_offset,:] = keys
+            self.kv[1,:,:,self.offset:new_offset,:] = values
+            self.offset = new_offset
+            return self.kv[0,:,:,:new_offset,:], self.kv[1,:,:,:new_offset,:]
+
 class Phi3Attention(nn.Module):
     def __init__(self, config):
         super().__init__()
@@ -371,7 +398,6 @@ class Phi3Attention(nn.Module):
         op_size = n_heads * head_dim + 2 * (n_kv_heads * head_dim)
         self.qkv_proj = nn.Linear(dim, op_size, bias=False)
         self.o_proj = nn.Linear(n_heads * head_dim, dim, bias=False)
-        self.use_quantized_cache=getattr(config, "use_quantized_cache", False)
     def __call__(self, x, cache, cos, sin, mask):
         B, L, D = x.shape
         qkv = self.qkv_proj(x)
@@ -380,29 +406,16 @@ class Phi3Attention(nn.Module):
         queries = queries.reshape(B, L, self.n_heads, -1).transpose(0, 2, 1, 3)
         keys = keys.reshape(B, L, self.n_kv_heads, -1).transpose(0, 2, 1, 3)
         values = values.reshape(B, L, self.n_kv_heads, -1).transpose(0, 2, 1, 3)
-        if cache is not None:
-            if self.use_quantized_cache:
-                key_cache = mx.dequantize(*cache[0], group_size=32).reshape((B, self.n_kv_heads, -1, self.head_dim))
-                value_cache = mx.dequantize(*cache[1], group_size=32).reshape((B, self.n_kv_heads, -1, self.head_dim))
-            else:
-                key_cache, value_cache = cache
-            queries = (queries * cos) + (_rotate_half(queries) * sin)
-            keys = (keys * cos) + (_rotate_half(keys) * sin)
-            keys = mx.concatenate([key_cache, keys], axis=2)
-            values = mx.concatenate([value_cache, values], axis=2)
-        else:
-            queries = (queries * cos) + (_rotate_half(queries) * sin)
-            keys = (keys * cos) + (_rotate_half(keys) * sin)
-
+        queries = _rotate_half(queries, cos, sin)
+        keys = _rotate_half(keys, cos, sin)
+        keys, values = cache(keys, values)
         scores = (queries * self.scale) @ keys.transpose(0, 1, 3, 2)
         scores += mask
         scores = mx.softmax(scores, axis=-1)
         output = scores @ values
         output = output.transpose(0, 2, 1, 3).reshape(B, L, -1)
-        if self.use_quantized_cache:
-            return self.o_proj(output), (mx.quantize(keys.reshape((B*self.n_kv_heads,-1)), group_size=32), mx.quantize(values.reshape((B*self.n_kv_heads,-1)), group_size=32))
-        else:
-            return self.o_proj(output), (keys, values)
+        # return self.o_proj(output), cache
+        return self.o_proj(output)
 
 class Phi3MLP(nn.Module):
     def __init__(self, config):
@@ -424,45 +437,33 @@ class Phi3DecoderLayer(nn.Module):
         self.post_attention_layernorm = nn.RMSNorm(config.hidden_size, eps=config.rms_norm_eps)
 
     def __call__(self, x, cache, cos, sin, mask):
-        r, cache = self.self_attn(self.input_layernorm(x), cache, cos, sin, mask)
+        # r, cache = self.self_attn(self.input_layernorm(x), cache, cos, sin, mask)
+        r = self.self_attn(self.input_layernorm(x), cache, cos, sin, mask)
         h = x + r
         r = self.mlp(self.post_attention_layernorm(h))
-        return h + r, cache
+        # return h + r, cache
+        return h + r
 
-def _get_past_L(cache, quantized):
-    if cache is None:
-        return 0
-    if quantized:
-        return mx.dequantize(*cache[0][0], group_size=32).shape[1] // 96
-    return cache[0][0].shape[2]
-
-def _get_mask_4d(past_key_values_length, L, mask):
-    mask_4d = mx.triu(mx.full((L+past_key_values_length, L+past_key_values_length), -mx.inf), k=1)[None, None]
-    if mask is not None:
-        pad_len = L+past_key_values_length - mask.shape[-1]
-        mask = mx.pad(mask, ((0,0),(0,pad_len)), 1)
-        mask = mx.expand_dims(mask, (1,2))
-        mask = mask*mask.transpose(0,1,3,2)
-        mask = mx.where(mask==1, 0, -np.inf)
-        mask_4d += mask
-        mask_4d = mx.repeat(mask_4d, 32, axis=1)
-    mask_4d = mask_4d[:,:,past_key_values_length:,:]
-    return mask_4d
 
 class Phi3SuScaledRotaryEmbedding:
-    def __init__(self, config, **kwargs):
+    def __init__(self, config, L_all):
         dim = config.hidden_size // config.num_attention_heads
         self.inv_freq_short = 1.0 / (mx.array(config.rope_scaling["short_factor"], dtype=mx.float32) * config.rope_theta**(mx.arange(0, dim, 2, dtype=mx.float32) / dim))
         self.inv_freq_long = 1.0 / (mx.array(config.rope_scaling["long_factor"], dtype=mx.float32) * config.rope_theta**(mx.arange(0, dim, 2, dtype=mx.float32) / dim))
         self.original_max_position_embeddings = config.original_max_position_embeddings
         self.scaling_factor = math.sqrt(1 + math.log(config.max_position_embeddings / config.original_max_position_embeddings) / math.log(config.original_max_position_embeddings))
 
+        position_ids = mx.arange(L_all, dtype=mx.float32)
+        inv_freq = self.inv_freq_long if L_all > self.original_max_position_embeddings else self.inv_freq_short
+        freqs = position_ids[:, None] * inv_freq[None, :]
+        emb = mx.concatenate([freqs, freqs], axis=-1)
+        self.cos = mx.cos(emb) * self.scaling_factor
+        self.sin = mx.sin(emb) * self.scaling_factor
+
     def __call__(self, past_L, new_L, pids):
-        def _get_pids(past_L, new_L, pids):
-            if past_L < 1:
-                return pids
-            return pids[:, -1][:, None] + past_L - pids.shape[1] + 1 + mx.arange(new_L)[None, :]
-        position_ids = mx.arange(past_L, past_L+new_L, dtype=mx.float32)[None] if pids is None else _get_pids(past_L, new_L, pids)
+        if pids is None:
+            return self.cos[past_L:past_L+new_L], self.sin[past_L:past_L+new_L]
+        position_ids = pids[:, -1][:, None] + past_L - pids.shape[1] + 1 + mx.arange(new_L)[None, :] if past_L > 0 else pids
         inv_freq = self.inv_freq_long if position_ids.max()+1 > self.original_max_position_embeddings else self.inv_freq_short
         inv_freq_expanded = mx.repeat(inv_freq[None, :, None], position_ids.shape[0], axis=0)
         position_ids_expanded = position_ids[:, None, :]
@@ -472,6 +473,21 @@ class Phi3SuScaledRotaryEmbedding:
         sin = mx.sin(emb) * self.scaling_factor
         return mx.expand_dims(cos, axis=1), mx.expand_dims(sin, axis=1) 
 
+class Mask4D:
+    def __init__(self, L_all, mask):
+        mask_4d = mx.triu(mx.full((L_all, L_all), -mx.inf), k=1)[None, None]
+        if mask is not None:
+            pad_len = L_all - mask.shape[-1]
+            mask = mx.pad(mask, ((0,0),(0,pad_len)), 1)
+            mask = mx.expand_dims(mask, (1,2))
+            mask = mask*mask.transpose(0,1,3,2)
+            mask = mx.where(mask==1, 0, -np.inf)
+            mask_4d += mask
+            mask_4d = mx.repeat(mask_4d, 32, axis=1)
+        self.mask_4d = mask_4d
+    def __call__(self, past_L, L):
+        return self.mask_4d[:,:,past_L:L+past_L,:L+past_L]
+
 class Phi3VModel(nn.Module):
     def __init__(self, config):
         super().__init__()
@@ -480,17 +496,21 @@ class Phi3VModel(nn.Module):
         self.layers = [Phi3DecoderLayer(config) for _ in range(config.num_hidden_layers)]
         self.norm = nn.RMSNorm(config.hidden_size, eps=config.rms_norm_eps)
         self.use_quantized_cache= getattr(config, "use_quantized_cache", False)
-        self.rope = Phi3SuScaledRotaryEmbedding(config)
-    def __call__(self, input_ids, pixel_values, image_sizes, positions, cache, pids, mask):
+        self.config = config
+        self.num_hidden_layers = config.num_hidden_layers
+    def __call__(self, input_ids, pixel_values, image_sizes, positions, cache, pids, mask, max_tokens):
         x = self.embed_tokens(input_ids)
         if pixel_values is not None:
             x = self.vision_embed_tokens(x, pixel_values, image_sizes, positions)
-        past_L = _get_past_L(cache, quantized=self.use_quantized_cache)
-        mask_4d = _get_mask_4d(past_L, x.shape[1], mask)
+        if cache is None:
+            cache = [KVCache(self.config, x, max_tokens) for _ in range(self.num_hidden_layers)]
+            self.rope = Phi3SuScaledRotaryEmbedding(self.config, x.shape[1]+max_tokens)
+            self.mask4d = Mask4D(x.shape[1]+max_tokens, mask)
+        past_L = cache[0].offset
+        mask = self.mask4d(past_L, x.shape[1])
         cos, sin = self.rope(past_L, x.shape[1], pids)
-        cache = [None] * len(self.layers) if cache is None else cache
         for i, l in enumerate(self.layers):
-            x, cache[i] = l(x, cache[i], cos, sin, mask_4d)
+            x = l(x, cache[i], cos, sin, mask)
         return self.norm(x), cache
 
 class Phi3VLModel(nn.Module):
@@ -499,8 +519,8 @@ class Phi3VLModel(nn.Module):
         self.config = config
         self.model = Phi3VModel(config)
         self.lm_head = nn.Linear(config.hidden_size, config.vocab_size, bias=False)
-    def __call__(self, input_ids, pixel_values=None, image_sizes=None, positions=None, cache=None, pids=None, mask=None):
-        x, cache = self.model(input_ids, pixel_values, image_sizes, positions, cache, pids, mask)
+    def __call__(self, input_ids, pixel_values=None, image_sizes=None, positions=None, cache=None, pids=None, mask=None, max_tokens=None):
+        x, cache = self.model(input_ids, pixel_values, image_sizes, positions, cache, pids, mask, max_tokens)
         return self.lm_head(x), cache
     @property
     def layers(self):
@@ -615,7 +635,7 @@ def generate(model, processor, prompt, images=None, max_tokens=100, verbose=True
         raise ValueError('Images cannot be provided when prompt is a list')
     tic = time.perf_counter()
     dict_input = processor(images, prompt)
-    logits, cache = model(**dict_input)
+    logits, cache = model(**dict_input, max_tokens=max_tokens)
     token = mx.argmax(logits[:, -1, :], axis=-1)[:,None]
     mx.eval(token, cache)
     list_tokens = [token]
@@ -845,30 +865,4 @@ agent = Agent()
 agent('Plot sine wave.')
 agent('Modify the code to add cosine wave to the plot.')
 agent.end()
-
-# `lora
-train_lora()
-recall()
-
-# `load
-model, processor = load()                                                                           # `vanilla
-model, processor = load(model_path='quantized_phi3v')                                               # `q_model
-model, processor = load(use_quantized_cache=True)                                                   # `q_cache
-model, processor = load(adapter_path='adapters')                                                    # `lora
-model, processor = load(model_path='quantized_phi3v', use_quantized_cache=True)                     # `q_model_cache
-
-# `generate
-generate(model, processor, 
-    "<|user|>\n<|image_1|>\nWhat is shown in this image?<|end|>\n<|assistant|>\n", 
-    [Image.open(requests.get("https://assets-c4akfrf5b4d3f4b7.z01.azurefd.net/assets/2024/04/BMDataViz_661fb89f3845e.png" , stream=True).raw)]
-)
-generate(model, processor, 
-    "<|user|>Write a sci-fi thriller.<|end|>\n<|assistant|>\n"
-)
-generate(model, processor, [
-    "<|user|>Write an executive summary for a communications business plan<|end|>\n<|assistant|>\n", 
-    "<|user|>Write a resume.<|end|>\n<|assistant|>\n", 
-    "<|user|>Write a mystery horror.<|end|>\n<|assistant|>\n",
-    "<|user|>Write a Neurology ICU Admission Note.<|end|>\n<|assistant|>\n"]
-)
 """
