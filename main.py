@@ -353,6 +353,7 @@ class Phi3ImageEmbedding(nn.Module):
             idx += cnt
         return txt_embeds
 
+@mx.compile
 def _rotate_half(x):
     midpoint = x.shape[-1] // 2  
     x1, x2 = x[..., :midpoint], x[..., midpoint:]  
@@ -616,6 +617,7 @@ def generate(model, processor, prompt, images=None, max_tokens=100, verbose=True
     dict_input = processor(images, prompt)
     logits, cache = model(**dict_input)
     token = mx.argmax(logits[:, -1, :], axis=-1)[:,None]
+    mx.eval(token, cache)
     list_tokens = [token]
     prompt_time = time.perf_counter() - tic
     tic = time.perf_counter()
@@ -624,6 +626,7 @@ def generate(model, processor, prompt, images=None, max_tokens=100, verbose=True
     for _ in range(max_tokens-1):
         logits, cache = model(input_ids=token, cache=cache, mask=mask, pids=pids)
         token = mx.argmax(logits[:, -1, :], axis=-1)[:,None]
+        mx.eval(token, cache)
         list_tokens.append(token)
         if processor.tokenizer.eos_token_id in token:
             break

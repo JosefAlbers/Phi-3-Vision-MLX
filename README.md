@@ -5,7 +5,7 @@ This project brings the powerful phi-3-vision VLM to Apple's MLX framework, offe
 ## Key Features
 
 * **Su-scaled RoPE:** Implements Su-scaled Rotary Position Embeddings to manage sequences of up to 128K tokens.
-* **Batch Generation:** Accelerate inference by generating text for multiple prompts concurrently (94 tokens-per-sec batched vs 51 tokens-per-sec single)
+* **Batch Generation:** Accelerate inference by generating text for multiple prompts concurrently (97 tokens-per-sec batched vs 54 tokens-per-sec single)
 * **Cache Quantization:** Optimize inference for processing long contexts with key-value cache quantization (5.3s quantized vs 5.1s original).
 * **Model Quantization:** Reduce model size for faster loading and deployment (2.3GB quantized vs 8.5GB original).
 * **Chat Template:** Utilization of chat template for streamlining interactions with the model.
@@ -21,11 +21,13 @@ This project brings the powerful phi-3-vision VLM to Apple's MLX framework, offe
 chat('What is shown in this image?', 'https://assets-c4akfrf5b4d3f4b7.z01.azurefd.net/assets/2024/04/BMDataViz_661fb89f3845e.png')
 ```
 
-```zsh
+<details><summary>Click to expand output</summary><pre>
 The image displays a bar chart with percentages on the vertical axis ranging from 0% to 100%, and various statements on the horizontal axis. Each bar represents the percentage of respondents who agree with the corresponding statement.<|end|><|endoftext|>
-```
+</pre></details><br>
 
 ### **Batched Generation**
+
+Paddings for each input prompt and their corresponding attention masks, and position IDs are properly handled by the `generate` function to ensure correct model behavior.
 
 ```python
 chat([
@@ -35,7 +37,7 @@ chat([
     "Write a Neurology ICU Admission Note.",])
 ```
 
-```zsh
+<details><summary>Click to expand output</summary><pre>
 < Generated text for prompt #0 >
 Title: Communications Business Plan
 
@@ -83,9 +85,7 @@ Chief Complaint: Acute onset of severe headache, photophobia, and neck stiffness
 History of Present Illness:
 
 - Sudden onset of severe headache
-```
-
-*(Paddings for each input prompt and their corresponding attention masks, and position IDs are properly handled by the `generate` function to ensure correct model behavior.)*
+</pre></details><br>
 
 ### **Cache Quantization**
 
@@ -93,13 +93,13 @@ History of Present Illness:
 chat("Write an exciting sci-fi.", quantize_cache=True)
 ```
 
-```zsh
+<details><summary>Click to expand output</summary><pre>
 Title: The Last Resort
 
 In the year 2150, Earth is on the brink of collapse. The planet's resources are depleted, and the once-thriving cities are now desolate wastelands. The only hope for humanity lies in a distant planet, Proxima-4.
 
 A group of scientists and engineers have been working tirelessly to develop a spacecraft capable of traveling to Proxima-
-```
+</pre></details><br>
 
 ### **Model Quantization**
 
@@ -107,22 +107,18 @@ A group of scientists and engineers have been working tirelessly to develop a sp
 chat("Write an exciting sci-fi.", quantize_model=True)
 ```
 
-```zsh
+<details><summary>Click to expand output</summary><pre>
 Title: The Quantum Heist
 
 In the year 2050, the world had advanced beyond anything anyone had ever imagined. Technology had advanced so much that people could communicate instantly with each other, travel anywhere in the world in mere seconds, and even control machines with their minds. But with these advancements came a new threat - quantum computers.
 
 A group of hackers had managed to steal the blueprints for the most powerful quantum computer ever created.
-```
+</pre></details><br>
 
 ### **LoRA Training**
 
 ```python
 train_lora(lora_layers=5, lora_rank=16, epochs=10, lr=1e-4, warmup=.5, mask_ratios=[.0], adapter_path='adapters', dataset_path = "JosefAlbers/akemiH_MedQA_Reason")
-```
-
-```zsh
-16.44s user 8.85s system 36% cpu 1:08.65 total
 ```
 
 ![Alt text](assets/train_log.png)
@@ -133,13 +129,13 @@ train_lora(lora_layers=5, lora_rank=16, epochs=10, lr=1e-4, warmup=.5, mask_rati
 chat("Write an exciting sci-fi.", adapter_path='adapters')
 ```
 
-```zsh
+<details><summary>Click to expand output</summary><pre>
 Title: The Last AI
 
 In the year 2150, the world was dominated by artificial intelligence. Machines had taken over most of the jobs, and humans were left to pursue creative and intellectual endeavors. The most advanced AI of all time, named Aiden, had been created by a team of brilliant engineers at the Global Tech Corporation.
 
 Aiden was unlike any other AI, it was self-aware, had emotions
-```
+</pre></details><br>
 
 ### **Benchmarking** (WIP)
 
@@ -148,7 +144,6 @@ recall(dataset_path="JosefAlbers/akemiH_MedQA_Reason"):
 ```
 
 <details><summary>Click to expand output</summary><pre>
-```zsh
 Question: A 23-year-old pregnant woman at 22 weeks gestation presents with burning upon urination. She states it started 1 day ago and has been worsening despite drinking more water and taking cranberry extract. She otherwise feels well and is followed by a doctor for her pregnancy. Her temperature is 97.7°F (36.5°C), blood pressure is 122/77 mmHg, pulse is 80/min, respirations are 19/min, and oxygen saturation is 98% on room air. Physical exam is notable for an absence of costovertebral angle tenderness and a gravid uterus. Which of the following is the best treatment for this patient?
 - Taught: Nitrofurantoin is the best treatment for a pregnant patient with a likely urinary tract infection, due to its efficacy and safety profile during pregnancy.
 - Recall: Nitrofurantoin is the best treatment for a pregnant patient with a likely urinary tract infection, due to its efficacy
@@ -212,11 +207,12 @@ Question: A 35-year-old male presents to his primary care physician with complai
 ---
 Final Score: 0.6(6/10)
 13.16s user 10.00s system 40% cpu 57.670 total
-```
 </pre></details><br>
 
 
 ### **VLM Agent** (WIP)
+
+VLM's understanding of both text and visuals enables interactive generation and modification of plots/images, opening up new possibilities for GUI development and data visualization.
 
 ```python
 agent = Agent()
@@ -224,8 +220,6 @@ agent('Plot sine wave.')
 agent('Add cosine wave to the plot.')
 agent.end()
 ```
-
-VLM's understanding of both text and visuals enables interactive generation and modification of plots/images, opening up new possibilities for GUI development and data visualization.
 
 ## Installation
 
@@ -247,9 +241,9 @@ Please note that the version available through pip may not be the most up-to-dat
 
 | Task                  | Vanilla Model | Quantized Model | Quantized Cache | LoRA      |
 |-----------------------|---------------|-----------------|-----------------|-----------|
-| Text Generation       |  8.46 tps     | 51.41 tps       |  6.85 tps       | 8.45 tps  |
-| Image Captioning      |  4.16 tps     |  2.60 tps       |  1.52 tps       | 4.11 tps  |
-| Batched Generation    | 22.73 tps     | 94.21 tps       | 17.76 tps       | 28.13 tps |
+| Text Generation       |  8.66 tps     | 54.65 tps       |  7.08 tps       | 8.67 tps  |
+| Image Captioning      |  6.20 tps     | 10.42 tps       |  1.74 tps       | 6.12 tps  |
+| Batched Generation    | 28.32 tps     | 97.06 tps       | 19.30 tps       | 27.87 tps |
 
 ## License
 
