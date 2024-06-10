@@ -7,6 +7,7 @@ import requests
 import torch
 import datasets
 import random
+import textwrap
 import subprocess
 import mlx.core as mx
 import mlx.nn as nn
@@ -59,7 +60,7 @@ class Agent:
     @staticmethod
     def draw(code_string, draw_path='test_plot.png'):
         code_string = '\n'.join(re.findall(r"```python\n(.*?)```", code_string, re.DOTALL))
-        code_return = re.sub(r"plt\.savefig\((.*?)\)", "plt.show()", code_string).strip()
+        code_return = re.sub(r'plt\.savefig\(.*?\)', 'plt.show()', code_string)
         code_to_run = code_return.replace("plt.show()", f"plt.savefig('{draw_path}')")
         try:
             exec(code_to_run)
@@ -577,6 +578,12 @@ def _linear_to_lora_layers(model, lora_layers, config):
         lora_layers = [(k, to_lora(m)) for k, m in l.named_modules() if k == "self_attn.qkv_proj"]
         l.update_modules(tree_unflatten(lora_layers))
 
+def _load_text(root_url, list_doc, is_code = False):
+    list_str = [response.text for file_url in list_doc if (response := requests.get(f'{root_url}/{file_url}')).status_code == 200]
+    if is_code:
+        list_str = [f".. code-block:: python\n    :caption: {filename}\n\n{textwrap.indent(code, "    ")}" for filename, code in zip(list_doc, list_str)]
+    return '\n\n'.join(list_str)
+
 def _load_image(image_source): # copied from https://github.com/Blaizzy/mlx-vlm/blob/main/mlx_vlm/utils.py
     if isinstance(image_source, BytesIO):
         try:
@@ -630,7 +637,67 @@ def load(model_path='phi3v', adapter_path=None, **kwargs):
     model.eval()
     return model, Phi3VProcessor(model_path)
 
-def generate(model, processor, prompt, images=None, max_tokens=100, verbose=True, return_tps=False):
+class EarlyStopper:
+    def __init__(self, max_tokens, early_stop):
+        self.step = 0
+        self.early_stop = early_stop if isinstance(early_stop, int) and (early_stop < max_tokens) else False
+        self.log_prob_sum = 0.0
+        self.best_eos_sofar = -mx.inf
+        self.log_prob_sum_at_best_eos = 0.0
+    def __call__(self, logits):
+        if not self.early_stop:
+            return False
+        if logits.shape[0] > 1:
+            self.early_stop = False
+            return False
+        log_prob = nn.log_softmax(logits)
+        log_prob_best = mx.max(log_prob[:,-1,:], axis=-1).item()
+        log_prob_eos = log_prob[:,-1,32007].item()
+
+        if log_prob_eos > self.best_eos_sofar:
+            self.log_prob_sum_since_last_best_eos = self.log_prob_sum - self.log_prob_sum_at_best_eos
+            if ((self.log_prob_sum_since_last_best_eos) < (self.best_eos_sofar)) and (self.step > self.early_stop):
+                return True
+            else:
+                self.best_eos_sofar = log_prob_eos
+                self.log_prob_sum_at_best_eos = self.log_prob_sum
+        self.log_prob_sum += log_prob_best
+        self.step+=1
+        return False
+
+class Streamer:
+    def __init__(self, processor, stream):
+        self.tokenizer = processor.tokenizer
+        self.stream = stream
+        self.list_tokens = []
+        self.idx_sofar = 0
+    def __call__(self, token):
+        if not self.stream:
+            self.list_tokens.append(token)
+            return None
+        if token.shape[0] > 1:
+            self.list_tokens.append(token)
+            self.stream = False
+            return None
+        self.list_tokens.append(token.item())
+        txt = self.tokenizer.decode(self.list_tokens)
+        idx_split = txt.rfind(' ', self.idx_sofar)
+        if idx_split > 0:
+            print(txt[self.idx_sofar:idx_split], end = '', flush=True)
+            self.idx_sofar = idx_split
+    def end(self):
+        if self.stream:
+            txt = self.tokenizer.decode(self.list_tokens)
+            print(txt[self.idx_sofar:])
+            return [txt], len(self.list_tokens)
+        else:
+            arr_tokens = mx.concatenate(self.list_tokens, axis=1)
+            return [self.tokenizer.decode(i) for i in arr_tokens.tolist()], arr_tokens.size
+
+def generate(model, processor, prompt, images=None, max_tokens=100, verbose=True, return_tps=False, early_stop=100, stream=True):
+    early_stopper = EarlyStopper(max_tokens, early_stop)
+    streamer = Streamer(processor, stream)
+
     if images is not None and isinstance(prompt, list):
         raise ValueError('Images cannot be provided when prompt is a list')
     tic = time.perf_counter()
@@ -638,32 +705,33 @@ def generate(model, processor, prompt, images=None, max_tokens=100, verbose=True
     logits, cache = model(**dict_input, max_tokens=max_tokens)
     token = mx.argmax(logits[:, -1, :], axis=-1)[:,None]
     mx.eval(token, cache)
-    list_tokens = [token]
+    streamer(token)
     prompt_time = time.perf_counter() - tic
     tic = time.perf_counter()
     mask=dict_input.get('mask', None)
     pids=dict_input.get('pids', None)
-    for _ in range(max_tokens-1):
+    for i in range(max_tokens-1):
         logits, cache = model(input_ids=token, cache=cache, mask=mask, pids=pids)
         token = mx.argmax(logits[:, -1, :], axis=-1)[:,None]
         mx.eval(token, cache)
-        list_tokens.append(token)
+        streamer(token)
+        if early_stopper(logits):
+            break
         if processor.tokenizer.eos_token_id in token:
             break
-    list_tokens = mx.concatenate(list_tokens, axis=1)
+    result, len_result = streamer.end()
 
-    result = [processor.tokenizer.decode(i) for i in list_tokens.tolist()]
+    gen_time = time.perf_counter() - tic
+    prompt_tps =  dict_input['input_ids'].size / prompt_time
+    gen_tps = (len_result - 1) / gen_time
+
     if verbose:
-        for i, gen in enumerate(result):
-            print(f'\n< Generated text for prompt #{i} >') if len(result) > 1 else None
-            print(gen)
-        gen_time = time.perf_counter() - tic
-        prompt_tps =  dict_input['input_ids'].size / prompt_time
-        gen_tps = (list_tokens.size - 1) / gen_time
-        print(f"\nPrompt: {prompt_tps:.3f} tokens-per-sec")
-        print(f"Generation: {gen_tps:.3f} tokens-per-sec")
-    # if return_cache:
-    #     return result, cache
+        if not streamer.stream:
+            for i, gen in enumerate(result):
+                print(f'\n< Generated text for prompt #{i} >')
+                print(gen)
+        print(f"\nPrompt: {prompt_tps:.2f} tokens-per-sec ({dict_input['input_ids'].size} tokens / {prompt_time:.1f} sec)")
+        print(f"Generation: {gen_tps:.2f} tokens-per-sec ({len_result} tokens / {gen_time:.1f} sec)")
     if return_tps:
         return prompt_tps, gen_tps
     return result
@@ -786,7 +854,7 @@ def recall(dataset_path="JosefAlbers/akemiH_MedQA_Reason"):
     del model
     del processor
 
-def chat(prompt, images=None, quantize_model=False, quantize_cache=False, adapter_path=None, max_tokens=100, verbose=True, return_tps=False):
+def chat(prompt, images=None, quantize_model=False, quantize_cache=False, adapter_path=None, max_tokens=100, verbose=True, return_tps=False, early_stop=100, stream=True):
     if (quantize_model is True) and (not os.path.exists('quantized_phi3v')):
         quantize()
     if images is not None:
@@ -799,7 +867,7 @@ def chat(prompt, images=None, quantize_model=False, quantize_cache=False, adapte
     print(f'### Prompt ###\n{"\n".join(map(str.strip, prompt)).strip()}\n### Images ###\n{'\n'.join(map(str, images)) if images else "None"}\n### Output ###') if verbose else None
     prompt = prompt[0] if len(prompt) == 1 else prompt
     model_path='quantized_phi3v' if quantize_model is True else 'phi3v'
-    return generate(*load(model_path=model_path, use_quantized_cache=quantize_cache, adapter_path=adapter_path), prompt, images, max_tokens=max_tokens, verbose=verbose, return_tps=return_tps)
+    return generate(*load(model_path=model_path, use_quantized_cache=quantize_cache, adapter_path=adapter_path), prompt, images, max_tokens=max_tokens, verbose=verbose, return_tps=return_tps, early_stop=early_stop, stream=stream)
 
 def benchmark():
     prompts = [
@@ -863,6 +931,12 @@ chat('Write a space opera.', quantize_model=True, quantize_cache=True)
 # `generate -> execute -> visual feedback
 agent = Agent()
 agent('Plot sine wave.')
-agent('Modify the code to add cosine wave to the plot.')
+agent('Modify the code to add cosine wave.')
 agent.end()
+
+# `12K context
+context = _load_text("https://raw.githubusercontent.com/ml-explore/mlx/main/docs/src", ["index.rst", "usage/quick_start.rst", "examples/mlp.rst", "examples/llama-inference.rst"])
+gh_code = _load_text("https://raw.githubusercontent.com/vegaluisjose/mlx-rag/main", ["model.py", "vdb.py",], True)
+prompt = '{context}\n<|end|>\n<|user|>Explain the folowing codes.\n\n{gh_code}\n'.format(context=context, gh_code=gh_code)
+chat(prompt, max_tokens=1000)
 """

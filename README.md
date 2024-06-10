@@ -5,24 +5,30 @@ This project brings the powerful phi-3-vision VLM to Apple's MLX framework, offe
 ## Key Features
 
 * **Su-scaled RoPE:** Implements Su-scaled Rotary Position Embeddings to manage sequences of up to 128K tokens.
-* **Batch Generation:** Accelerate inference by generating text for multiple prompts concurrently (97 tokens-per-sec batched vs 54 tokens-per-sec single)
+* **Batch Generation:** Accelerate inference by generating text for multiple prompts concurrently (107 tokens-per-sec batched vs 56 tokens-per-sec original)
 * **Cache Quantization:** Optimize inference for processing long contexts with key-value cache quantization (5.3s quantized vs 5.1s original).
 * **Model Quantization:** Reduce model size for faster loading and deployment (2.3GB quantized vs 8.5GB original).
 * **Chat Template:** Utilization of chat template for streamlining interactions with the model.
 * **LoRA Training:** Easily customize the model for specific tasks or datasets using LoRA.
 * **Benchmarking:** To quickly assess model performance on any dataset. (WIP)
 * **VLM Agent:** Leverages VLM's visual understanding for interactive code generation and refinement, enabling data visualization and image manipulation through a visual feedback loop. (WIP)
+* **Long Context RAG:** Enables the integration of Retrieval-Augmented Generation to harness large amounts of external knowledge for complex tasks such as code understanding, leveraging the phi-3-vision model's 128K context window. (WIP)
 
-## Usage
+## Quick Start
 
 ### **Image Captioning**
 
 ```python
+# from phi_3_vision_mlx import chat
+
 chat('What is shown in this image?', 'https://assets-c4akfrf5b4d3f4b7.z01.azurefd.net/assets/2024/04/BMDataViz_661fb89f3845e.png')
 ```
 
 <details><summary>Click to expand output</summary><pre>
-The image displays a bar chart with percentages on the vertical axis ranging from 0% to 100%, and various statements on the horizontal axis. Each bar represents the percentage of respondents who agree with the corresponding statement.<|end|><|endoftext|>
+The image displays a bar chart with percentages on the vertical axis ranging from 0% to 100%, and various statements on the horizontal axis. Each bar represents the percentage of respondents who agree with the corresponding statement. The statements include 'Having clear goals for a meeting', 'Knowing where to find information', 'Having more focus on summarization', 'Understand information I need', 'Having tools to prepare for meetings', and 'Having clear
+
+Prompt: 377.97 tokens-per-sec (3103 tokens / 8.2 sec)
+Generation: 8.04 tokens-per-sec (100 tokens / 12.3 sec)
 </pre></details><br>
 
 ### **Batched Generation**
@@ -43,81 +49,90 @@ Title: Communications Business Plan
 
 Executive Summary:
 
-Our communications business aims to provide high-quality, reliable, and affordable communication solutions to our clients. We will achieve this by leveraging the latest technology, offering personalized customer service, and maintaining a strong focus on customer satisfaction.
+Our communications business plan aims to establish a leading provider of communication solutions for businesses and individuals. We will focus on delivering high-quality, reliable, and cost-effective communication services, including voice, video, and data services. Our services will be tailored to meet the unique needs of our customers, and we will offer a range of packages and plans to suit different budgets and requirements.
 
-Our services will include voice and data communication, as well as internet and mobile services. We will also offer value-added services such as call forwarding,
 
 < Generated text for prompt #1 >
-[Name]
+Title: [Your Name]
 
-[Address]
+Contact Information:
 
-[Phone Number]
-
-[Email Address]
+Email: [Your Email]
+Phone: [Your Phone]
 
 Objective:
 
-To secure a position as a [Job Title] in [Company Name] that utilizes my skills and experience in [Specific Skill/Experience] to contribute to the success of the organization.
+To obtain a position as a [Your Desired Position] in [Your Industry/Company] that utilizes my skills and experience to contribute to the success of the organization.
 
 Education:
 
-[University Name], [City, State]
-
-Bachelor of Science in [Field of Study
+[Your Name]
+[Your Degree]
+[Your Major]
+[Your University]
+[Year
 
 < Generated text for prompt #2 >
 Title: The Haunting of Hillcrest Manor
 
-In the small, sleepy town of Willow Creek, nestled at the edge of a dense forest, stood Hillcrest Manor, a once-grand estate that had fallen into disrepair. The locals whispered of its former glory days, when it was the home of the wealthy and influential Hawthorne family. But those days were long gone, and the manor had been abandoned
+In the small, sleepy town of Crestwood, nestled at the edge of a dense forest, stood an imposing manor known as Hillcrest Manor. The manor had been abandoned for decades, its once grand facade now crumbling and overgrown with ivy. Whispers of its dark past and the mysterious disappearance of its former inhabitants had become the stuff of local
 
 < Generated text for prompt #3 >
-Patient Name: John Doe
+Neurology ICU Admission Note
 
-Date of Admission: 01/01/2022
+Patient: John Doe
 
-Time of Admission: 10:00 AM
+Date: [Insert Date]
 
-Attending Physician: Dr. Jane Smith
+Time: [Insert Time]
 
-Chief Complaint: Acute onset of severe headache, photophobia, and neck stiffness.
+Chief Complaint: Severe headache, nausea, and vomiting
 
-History of Present Illness:
+History of Present Illness: The patient presented to the emergency department with a severe headache, nausea, and vomiting. The headache was described as a constant, throbbing pain that was worse
 
-- Sudden onset of severe headache
+Prompt: 134.22 tokens-per-sec (80 tokens / 0.6 sec)
+Generation: 30.74 tokens-per-sec (400 tokens / 13.0 sec)
 </pre></details><br>
 
 ### **Cache Quantization**
 
 ```python
-chat("Write an exciting sci-fi.", quantize_cache=True)
+chat("Write a space opera.", quantize_cache=True)
 ```
 
 <details><summary>Click to expand output</summary><pre>
-Title: The Last Resort
+Title: The Last Frontier
 
-In the year 2150, Earth is on the brink of collapse. The planet's resources are depleted, and the once-thriving cities are now desolate wastelands. The only hope for humanity lies in a distant planet, Proxima-4.
+In the year 2345, humanity had finally colonized the galaxy. The once-dusty planets of the Milky Way were now thriving with life, and the stars were no longer just distant points of light. The interstellar empire had grown to encompass thousands of worlds, and the people of Earth had become a unified, galactic civilization.
 
-A group of scientists and engineers have been working tirelessly to develop a spacecraft capable of traveling to Proxima-
+But not all was well
+
+Prompt: 45.06 tokens-per-sec (13 tokens / 0.3 sec)
+Generation: 7.04 tokens-per-sec (100 tokens / 14.1 sec)
 </pre></details><br>
 
 ### **Model Quantization**
 
 ```python
-chat("Write an exciting sci-fi.", quantize_model=True)
+chat("Write a space opera.", quantize_model=True)
 ```
 
 <details><summary>Click to expand output</summary><pre>
-Title: The Quantum Heist
+Title: The Galactic Conquest
 
-In the year 2050, the world had advanced beyond anything anyone had ever imagined. Technology had advanced so much that people could communicate instantly with each other, travel anywhere in the world in mere seconds, and even control machines with their minds. But with these advancements came a new threat - quantum computers.
+In the far reaches of the galaxy, a war rages between the United Planetary Alliance and the Coalition of Independent Systems. The UPA, a powerful coalition of planets, has declared war on the CoIS, a group of independent systems that refuse to be governed by a central authority.
 
-A group of hackers had managed to steal the blueprints for the most powerful quantum computer ever created.
+The conflict began when the UPA attempted to annex the CoIS, claiming that they were not strong enough to defend
+
+Prompt: 137.96 tokens-per-sec (13 tokens / 0.1 sec)
+Generation: 55.97 tokens-per-sec (100 tokens / 1.8 sec)
 </pre></details><br>
 
 ### **LoRA Training**
 
 ```python
+# from phi_3_vision_mlx import train_lora
+
 train_lora(lora_layers=5, lora_rank=16, epochs=10, lr=1e-4, warmup=.5, mask_ratios=[.0], adapter_path='adapters', dataset_path = "JosefAlbers/akemiH_MedQA_Reason")
 ```
 
@@ -135,11 +150,16 @@ Title: The Last AI
 In the year 2150, the world was dominated by artificial intelligence. Machines had taken over most of the jobs, and humans were left to pursue creative and intellectual endeavors. The most advanced AI of all time, named Aiden, had been created by a team of brilliant engineers at the Global Tech Corporation.
 
 Aiden was unlike any other AI, it was self-aware, had emotions
+
+Prompt: 45.52 tokens-per-sec (13 tokens / 0.3 sec)
+Generation: 8.71 tokens-per-sec (100 tokens / 11.4 sec)
 </pre></details><br>
 
 ### **Benchmarking** (WIP)
 
 ```python
+# from phi_3_vision_mlx import recall
+
 recall(dataset_path="JosefAlbers/akemiH_MedQA_Reason"):
 ```
 
@@ -209,17 +229,55 @@ Final Score: 0.6(6/10)
 13.16s user 10.00s system 40% cpu 57.670 total
 </pre></details><br>
 
-
 ### **VLM Agent** (WIP)
 
 VLM's understanding of both text and visuals enables interactive generation and modification of plots/images, opening up new possibilities for GUI development and data visualization.
 
 ```python
+# from phi_3_vision_mlx import Agent
+
 agent = Agent()
 agent('Plot sine wave.')
-agent('Add cosine wave to the plot.')
-agent.end()
 ```
+
+![Alt text](assets/agent_0.png)
+
+```python
+agent('Modify the code to add cosine wave.')
+```
+
+![Alt text](assets/agent_1.png)
+
+### **Long Context RAG** (WIP)
+
+This code demonstrates a Retrieval-Augmented Generation (RAG) workflow by fetching documentations and source codes from GitHub repositories, consolidating them into an 11,135 token prompt, and feeding it into a language model. Leveraging the 128K context window, the model then utilizes the retrieved information to provide an explanation of the codes contained in the target repository.
+
+```python
+# from phi_3_vision_mlx import _load_text
+
+context = _load_text("https://raw.githubusercontent.com/ml-explore/mlx/main/docs/src", ["index.rst", "usage/quick_start.rst", "examples/mlp.rst", "examples/llama-inference.rst"])
+gh_code = _load_text("https://raw.githubusercontent.com/vegaluisjose/mlx-rag/main", ["model.py", "vdb.py",], True)
+prompt = '{context}\n<|end|>\n<|user|>Explain the folowing codes.\n\n{gh_code}\n'.format(context=context, gh_code=gh_code)
+chat(prompt, max_tokens=1000)
+```
+
+<details><summary>Click to expand output</summary><pre>
+The provided code is a Python implementation of a vector database (VDB) using the MLX framework. The VDB is designed to store and retrieve text data in a vectorized format, allowing for efficient similarity search and retrieval. The code includes several classes and functions to handle the various aspects of the VDB, such as loading and saving the model, ingesting text data, querying the database, and saving the database to disk.
+
+The `Model` class is the main class that handles the vector database operations. It loads the model from a pre-trained embedding model and initializes the necessary components, such as the embeddings and the encoder. The `run` method is used to run the model on a given input text and returns the embeddings. The `savez` method is used to save the model to disk.
+
+The `BertEmbeddings` class is a subclass of `nn.Module` that represents the BERT embeddings used for the VDB. It includes methods for initializing the embeddings and computing the embeddings for a given input text.
+
+The `Bert` class is another subclass of `nn.Module` that represents the BERT model used for the VDB. It includes methods for running the model on a given input text and returning the embeddings.
+
+The `Model` class is a wrapper class that uses the `Bert` class to create a vector database. It loads the model from a pre-trained embedding model and initializes the necessary components. The `ingest` method is used to ingest text data into the VDB. The `query` method is used to query the VDB for similar text based on a given input text.
+
+The `VectorDB` class is a wrapper class that uses the `Model` class to create a vector database. It loads the model from a pre-trained embedding model and initializes the necessary components. The `ingest` method is used to ingest text data into the VDB. The `savez` method is used to save the VDB to disk.
+
+
+Prompt: 284.76 tokens-per-sec (11135 tokens / 39.1 sec)
+Generation: 6.22 tokens-per-sec (444 tokens / 71.2 sec)
+</pre></details><br>
 
 ## Installation
 
@@ -239,11 +297,11 @@ Please note that the version available through pip may not be the most up-to-dat
 
 ## Benchmarks
 
-| Task                  | Vanilla Model | Quantized Model | Quantized Cache | LoRA      |
-|-----------------------|---------------|-----------------|-----------------|-----------|
-| Text Generation       |  8.66 tps     | 54.65 tps       |  7.08 tps       | 8.67 tps  |
-| Image Captioning      |  6.20 tps     | 10.42 tps       |  1.74 tps       | 6.12 tps  |
-| Batched Generation    | 28.32 tps     | 97.06 tps       | 19.30 tps       | 27.87 tps |
+| Task                  | Vanilla Model | Quantized Model | Quantized Cache | LoRA        |
+|-----------------------|---------------|-----------------|-----------------|-------------|
+| Text Generation       |  8.72 tps     |  55.97 tps       |  7.04 tps      |  8.71 tps   |
+| Image Captioning      |  8.04 tps     |  32.48 tps       |  1.77 tps      |  8.00 tps   |
+| Batched Generation    | 30.74 tps     | 106.94 tps       | 20.47 tps      | 30.72 tps   |
 
 ## License
 
