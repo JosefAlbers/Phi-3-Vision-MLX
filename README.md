@@ -16,6 +16,18 @@ This project brings the powerful phi-3-vision VLM to Apple's MLX framework, offe
 
 ## Quick Start
 
+### **VLM Agent** (WIP)
+
+VLM's understanding of both text and visuals enables interactive generation and modification of plots/images, opening up new possibilities for GUI development and data visualization.
+
+```python
+# from phi_3_vision_mlx import chatui
+
+chatui()
+```
+
+![Alt text](assets/chatui_2.png)
+
 ### **Image Captioning**
 
 ```python
@@ -97,35 +109,37 @@ Generation: 30.74 tokens-per-sec (400 tokens / 13.0 sec)
 ### **Cache Quantization**
 
 ```python
-chat("Write a space opera.", quantize_cache=True)
+chat("Write a cosmic horror.", quantize_cache=True)
 ```
 
 <details><summary>Click to expand output</summary><pre>
-Title: The Last Frontier
+Title: The Echoes of the Void
 
-In the year 2345, humanity had finally colonized the galaxy. The once-dusty planets of the Milky Way were now thriving with life, and the stars were no longer just distant points of light. The interstellar empire had grown to encompass thousands of worlds, and the people of Earth had become a unified, galactic civilization.
+In the depths of the cosmic abyss, where the stars are but distant memories and the black hole's pull is a relentless force, there exists a realm of unimaginable horror. This is the realm of The Echoes of the Void, a place where the very fabric of reality is distorted and the line between the living and the dead is blurred.
 
-But not all was well
+The Echo
 
-Prompt: 45.06 tokens-per-sec (13 tokens / 0.3 sec)
-Generation: 7.04 tokens-per-sec (100 tokens / 14.1 sec)
+Prompt: 45.88 tokens-per-sec (14 tokens / 0.3 sec)
+Generation: 6.82 tokens-per-sec (100 tokens / 14.5 sec)
 </pre></details><br>
 
 ### **Model Quantization**
 
 ```python
-chat("Write a space opera.", quantize_model=True)
+chat("Write a cosmic horror.", quantize_model=True)
 ```
 
 <details><summary>Click to expand output</summary><pre>
-Title: The Galactic Conquest
+Title: The Eye of the Void
 
-In the far reaches of the galaxy, a war rages between the United Planetary Alliance and the Coalition of Independent Systems. The UPA, a powerful coalition of planets, has declared war on the CoIS, a group of independent systems that refuse to be governed by a central authority.
+The night was dark and cold, and the stars shone brightly in the sky above. The wind howled through the trees, carrying with it the scent of death and decay.
 
-The conflict began when the UPA attempted to annex the CoIS, claiming that they were not strong enough to defend
+In the heart of the forest, a lone figure stood, staring into the abyss. His name was John, and he had been drawn to this place by a mysterious force that he could not explain.
 
-Prompt: 137.96 tokens-per-sec (13 tokens / 0.1 sec)
-Generation: 55.97 tokens-per-sec (100 tokens / 1.8 sec)
+As he stood there
+
+Prompt: 149.99 tokens-per-sec (14 tokens / 0.1 sec)
+Generation: 53.36 tokens-per-sec (100 tokens / 1.9 sec)
 </pre></details><br>
 
 ### **LoRA Training**
@@ -141,26 +155,26 @@ train_lora(lora_layers=5, lora_rank=16, epochs=10, lr=1e-4, warmup=.5, mask_rati
 ### **LoRA Inference**
 
 ```python
-chat("Write an exciting sci-fi.", adapter_path='adapters')
+chat("Write a cosmic horror.", adapter_path='adapters')
 ```
 
 <details><summary>Click to expand output</summary><pre>
-Title: The Last AI
+Title: The Echoes of the Void
 
-In the year 2150, the world was dominated by artificial intelligence. Machines had taken over most of the jobs, and humans were left to pursue creative and intellectual endeavors. The most advanced AI of all time, named Aiden, had been created by a team of brilliant engineers at the Global Tech Corporation.
+In the depths of the cosmic abyss, where the stars are but distant memories and the black hole's pull is a relentless force, there exists a realm of unimaginable horror. This is the realm of The Echoes of the Void, a place where the very fabric of reality is distorted and the line between life and death is blurred.
 
-Aiden was unlike any other AI, it was self-aware, had emotions
+The Echoes of
 
-Prompt: 45.52 tokens-per-sec (13 tokens / 0.3 sec)
-Generation: 8.71 tokens-per-sec (100 tokens / 11.4 sec)
+Prompt: 36.87 tokens-per-sec (14 tokens / 0.4 sec)
+Generation: 8.56 tokens-per-sec (100 tokens / 11.6 sec)
 </pre></details><br>
 
-### **Benchmarking** (WIP)
+### **LoRA Testing** (WIP)
 
 ```python
 # from phi_3_vision_mlx import recall
 
-recall(dataset_path="JosefAlbers/akemiH_MedQA_Reason"):
+test_lora(dataset_path="JosefAlbers/akemiH_MedQA_Reason"):
 ```
 
 <details><summary>Click to expand output</summary><pre>
@@ -228,25 +242,6 @@ Question: A 35-year-old male presents to his primary care physician with complai
 Final Score: 0.6(6/10)
 13.16s user 10.00s system 40% cpu 57.670 total
 </pre></details><br>
-
-### **VLM Agent** (WIP)
-
-VLM's understanding of both text and visuals enables interactive generation and modification of plots/images, opening up new possibilities for GUI development and data visualization.
-
-```python
-# from phi_3_vision_mlx import Agent
-
-agent = Agent()
-agent('Plot sine wave.')
-```
-
-![Alt text](assets/agent_0.png)
-
-```python
-agent('Modify the code to add cosine wave.')
-```
-
-![Alt text](assets/agent_1.png)
 
 ### **Long Context RAG** (WIP)
 
