@@ -4,14 +4,14 @@ This project brings the powerful phi-3-vision VLM to Apple's MLX framework, offe
 
 ## Key Features
 
-* **Su-scaled RoPE:** Implements Su-scaled Rotary Position Embeddings to manage sequences of up to 128K tokens.
+* **VLM Agent:** Leverages VLM's visual understanding for interactive code generation and refinement, enabling data visualization and image manipulation through a visual feedback loop. (WIP)
 * **Batch Generation:** Accelerate inference by generating text for multiple prompts concurrently (107 tokens-per-sec batched vs 56 tokens-per-sec original)
 * **Cache Quantization:** Optimize inference for processing long contexts with key-value cache quantization (5.3s quantized vs 5.1s original).
 * **Model Quantization:** Reduce model size for faster loading and deployment (2.3GB quantized vs 8.5GB original).
+* **Su-scaled RoPE:** Implements Su-scaled Rotary Position Embeddings to manage sequences of up to 128K tokens.
 * **Chat Template:** Utilization of chat template for streamlining interactions with the model.
 * **LoRA Training:** Easily customize the model for specific tasks or datasets using LoRA.
 * **Benchmarking:** To quickly assess model performance on any dataset. (WIP)
-* **VLM Agent:** Leverages VLM's visual understanding for interactive code generation and refinement, enabling data visualization and image manipulation through a visual feedback loop. (WIP)
 * **Long Context RAG:** Enables the integration of Retrieval-Augmented Generation to harness large amounts of external knowledge for complex tasks such as code understanding, leveraging the phi-3-vision model's 128K context window. (WIP)
 
 ## Quick Start
@@ -27,6 +27,8 @@ chatui()
 ```
 
 ![Alt text](assets/chatui_2.png)
+
+![Alt text](assets/chatui_caption.png)
 
 ### **Image Captioning**
 

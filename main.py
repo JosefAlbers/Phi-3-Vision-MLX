@@ -4,7 +4,7 @@ import glob
 import os
 import re
 import requests
-import torch
+# import torch
 import datasets
 import random
 import textwrap
@@ -32,13 +32,14 @@ class Agent:
     def __init__(self, executor=None, **kwargs):
         self.execute = execute if executor is None else executor
         self.kwargs = kwargs
-        self.preload = load(**kwargs)
+        self.preload = _preload(**kwargs)
         self.reset()
         
     def reset(self):
         self.log = []
         self.step = 0
         self.ongoing = None
+        self.user_since = 0
 
     def __call__(self, prompt:str, images=None, **kwargs):
         if self.step > 0:
@@ -379,6 +380,51 @@ class Phi3VProcessor:
                 "image_sizes": mx.array(image_sizes),
                 "positions": mx.array(positions)}
 
+def interpolate_336(input):
+    def get_weights_and_indices(scale, out_size, in_size):
+        def cubic(x):
+            abs_x = np.abs(x)
+            abs_x2 = abs_x ** 2
+            abs_x3 = abs_x ** 3
+            f = ((1.5 * abs_x3 - 2.5 * abs_x2 + 1) * (abs_x <= 1) +
+                (-0.5 * abs_x3 + 2.5 * abs_x2 - 4 * abs_x + 2) * ((abs_x > 1) & (abs_x <= 2)))
+            return f
+        kernel_radius = 2
+        kernel_width = kernel_radius * 2
+        out_coordinates = np.linspace(0, in_size - 1, out_size)
+        in_coordinates = out_coordinates / scale
+        left_indices = np.floor(in_coordinates - 0.5).astype(np.int32)
+        right_indices = left_indices + 1
+        left_indices = np.clip(left_indices, 0, in_size - 1)
+        right_indices = np.clip(right_indices, 0, in_size - 1)
+        weights = np.zeros((out_size, kernel_width), dtype=np.float32)
+        indices = np.zeros((out_size, kernel_width), dtype=np.int32)
+        for i in range(out_size):
+            indices[i, 0] = left_indices[i]
+            indices[i, 1] = right_indices[i]
+            weights[i, 0] = cubic(in_coordinates[i] - left_indices[i])
+            weights[i, 1] = cubic(right_indices[i] - in_coordinates[i])
+
+            weight_sum = weights[i].sum()
+            if weight_sum != 0:
+                weights[i] /= weight_sum
+
+        return weights, indices
+    N, C, H, W = input.shape
+    out_hw = 336
+    output = np.zeros((N, C, out_hw, out_hw), dtype=input.dtype)
+    h_weights, h_indices = get_weights_and_indices(out_hw / H, out_hw, H)
+    w_weights, w_indices = get_weights_and_indices(out_hw / W, out_hw, W)
+    for n in range(N):
+        for c in range(C):
+            for i in range(out_hw):
+                for j in range(out_hw):
+                    h_kernel = input[n, c, h_indices[i]]
+                    w_kernel = h_kernel[:, w_indices[j]]
+                    output[n, c, i, j] = np.sum(h_weights[i][:, None] * w_weights[j] * w_kernel)
+
+    return output
+
 class Phi3VImageProcessor:
     def __init__(self):
         self.num_crops=16
@@ -416,7 +462,8 @@ class Phi3VImageProcessor:
         hd_images = [HD_transform(img) for img in images] 
         shapes = [[im.shape[1], im.shape[2]] for im in hd_images]
         num_img_tokens = [int((h//336*w//336+1)*144 + 1 + (h//336+1)*12) for h, w in shapes]
-        global_image = [torch.nn.functional.interpolate(torch.from_numpy(im[None]), size=(336, 336), mode='bicubic').numpy() for im in hd_images]
+        # global_image = [torch.nn.functional.interpolate(torch.from_numpy(im[None]), size=(336, 336), mode='bicubic').numpy() for im in hd_images]
+        global_image = [interpolate_336(im[None]) for im in hd_images]
         hd_images_reshape = [im
             .reshape(1, 3, h//336, 336, w//336, 336)
             .transpose(0,2,4,1,3,5)
@@ -694,7 +741,8 @@ def _apply_chat_template(prompt, images, verbose):
 
 def _preload(quantize_model=False, quantize_cache=False, adapter_path=None, **kwargs):
     if (quantize_model is True) and (not os.path.exists('quantized_phi3v')):
-        quantize()
+        # quantize()
+        snapshot_download(repo_id="JosefAlbers/Phi-3-vision-128k-instruct-mlx", allow_patterns=["*.safetensors", "*.json"], local_dir='quantized_phi3v')
     model_path='quantized_phi3v' if quantize_model is True else 'phi3v'
     return load(model_path=model_path, use_quantized_cache=quantize_cache, adapter_path=adapter_path)
 
@@ -892,7 +940,7 @@ def chat(prompt, images=None, preload=None, quantize_model=False, quantize_cache
     return generate(*preload, *_apply_chat_template(prompt, images, verbose), max_tokens=max_tokens, verbose=verbose, return_tps=return_tps, early_stop=early_stop, stream=stream)
 
 def chatui():
-    agent = Agent()
+    agent = Agent(max_tokens=1000, early_stop=False)
 
     def add_message(history, message):
         for x in message["files"]:
@@ -902,11 +950,14 @@ def chatui():
         return history, gr.MultimodalTextbox(value=None, interactive=False)
 
     def bot(history):
-        print(history)
-        response, file = agent(*history[-1])
+        def _get_input(history):
+            return history[-1][0], [i[0][0] for i in history[agent.user_since:-1]] if agent.user_since+1 < len(history) else None
+        agent_input = _get_input(history)
+        response, file = agent(*agent_input)
         history.append((None, response))
         if file is not None:
             history.append((None, (file,)))
+        agent.user_since = len(history)
         return history
 
     def reset():
@@ -918,7 +969,7 @@ def chatui():
             [],
             elem_id="chatbot",
             bubble_full_width=False,
-            height='75vh'
+            height='70vh'
         )
 
         chat_input = gr.MultimodalTextbox(interactive=True, file_types=["image"], placeholder="Enter message or upload file...", show_label=False)
