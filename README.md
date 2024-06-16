@@ -28,9 +28,13 @@ chatui()
 
 ![Alt text](assets/chatui_2.png)
 
+### **Visual Question Answering (VQA)**
+
+Simply drag and drop screenshot images from clipboard into the chatui textbox or upload images files for VQA.
+
 ![Alt text](assets/chatui_caption.png)
 
-### **Image Captioning**
+Or,
 
 ```python
 # from phi_3_vision_mlx import chat
