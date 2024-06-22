@@ -13,6 +13,7 @@ from typing import List, Optional
 from transformers import BertTokenizer
 
 import datasets
+import numpy as np
 
 def average_pool(last_hidden_state: mx.array, attention_mask: mx.array) -> mx.array:
     last_hidden = mx.multiply(last_hidden_state, attention_mask[..., None])
@@ -126,7 +127,6 @@ class Bert(nn.Module):
 class Model:
     def __init__(self) -> None:
         model_path = snapshot_download(repo_id="vegaluisjose/mlx-rag")
-
         with open(f"{model_path}/config.json") as f:
             model_config = ModelConfig(**json.load(f))
         self.model = Bert(model_config)
@@ -136,35 +136,69 @@ class Model:
     def __call__(self, input_text: List[str]) -> mx.array:
         tokens = self.tokenizer(input_text, return_tensors="np", padding=True)
         tokens = {key: mx.array(v) for key, v in tokens.items()}
-
         last_hidden_state, _ = self.model(**tokens)
-
         embeddings = average_pool(
             last_hidden_state, tokens["attention_mask"].astype(mx.float32)
         )
         embeddings = embeddings / mx.linalg.norm(embeddings, ord=2, axis=1)[..., None]
-
         return embeddings
 
+_list_api = [
+"""Text to image
+```python
+from gradio_client import Client
+client = Client("stabilityai/stable-diffusion-3-medium")
+result = client.predict(
+		prompt="{prompt}",
+		negative_prompt="ugly, low quality",
+		seed=0,
+		randomize_seed=True,
+		width=1024,
+		height=1024,
+		guidance_scale=5,
+		num_inference_steps=28,
+		api_name="/infer"
+)
+print('<|api_output|>'+result[0])
+```
+""",
+"""Text to speech
+```python
+from gradio_client import Client
+client = Client("parler-tts/parler_tts_mini")
+result = client.predict(
+        text="{prompt}",
+        description="",
+        api_name="/gen_tts"
+)
+print('<|api_output|>'+result)
+```
+""",
+"""Transcribe youtube video
+```python
+from gradio_client import Client
+client = Client("rajesh1729/youtube-video-transcription-with-whisper")
+result = client.predict(
+        url="{prompt}",
+        api_name="/get_summary"
+)
+print('<|api_output|>'+result)
+```
+""",
+]
 
 class VDB:
-    def __init__(self, repo_id='victor/hf-spaces-with-descriptions', embed='ai_description'):
+    def __init__(self, list_api=None, n_line=1):
         self.embed = Model()
-        self.ds = datasets.load_dataset(repo_id, split='train')
-        self.ds = self.ds[:100] # debug
-        self.list_src = self.ds[embed]
-        self.list_embed = mx.concatenate([self.embed(i) for i in self.list_src])
-    def __call__(self, text, n_topk=9, target='id'):
-        query_embed = self.embed(text)[0]
+        if list_api is None:
+            self.list_api = _list_api
+            list_src = _list_api if n_line < 0 else ['\n'.join(s.split('\n')[:n_line]) for s in _list_api]
+            self.list_embed = mx.concatenate([self.embed(i) for i in list_src])
+        else:
+            self.list_api = list_api['phi']
+            self.list_embed = mx.array(np.squeeze(list_api.with_format(type='numpy', columns=['gte'])['gte']))
+    def __call__(self, text, n_topk=1):
+        query_embed = self.embed(text)
         scores = mx.matmul(query_embed, self.list_embed.T)
-        list_idx = mx.argsort(scores).tolist()[::-1][:n_topk]
-        return [self.ds[target][i] for i in list_idx]
-
-"""
-Examples:
-
-vdb = VDB()
-x = vdb(vdb.list_src[0])
-print(x)
-"""
-
+        list_idx = mx.argsort(scores)[:,:-1-n_topk:-1].tolist()
+        return [[self.list_api[j] for j in i] for i in list_idx]

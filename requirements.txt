@@ -1,0 +1,6 @@
+mlx==0.15.0
+transformers==4.40.2
+numpy==1.26.4
+matplotlib==3.9.0
+datasets==2.19.1
+gradio==4.31.5

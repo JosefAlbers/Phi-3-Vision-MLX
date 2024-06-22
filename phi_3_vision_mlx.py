@@ -14,6 +14,7 @@ import mlx.nn as nn
 import numpy as np
 import mlx.optimizers as optim
 import matplotlib.pyplot as plt
+from urllib.parse import urlparse
 from io import BytesIO
 from pathlib import Path
 from huggingface_hub import snapshot_download
@@ -22,49 +23,13 @@ from mlx.utils import tree_flatten, tree_unflatten
 from PIL import Image, ImageOps
 from types import SimpleNamespace
 from transformers import AutoTokenizer
+from gte import VDB
 import time
 import logging
+import inspect
 import gradio as gr
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 logging.getLogger("transformers").setLevel(logging.ERROR)
-
-class Agent:
-    def __init__(self, executor=None, **kwargs):
-        self.execute = execute if executor is None else executor
-        self.kwargs = kwargs
-        self.preload = _preload(**kwargs)
-        self.reset()
-        
-    def reset(self):
-        self.log = []
-        self.step = 0
-        self.ongoing = None
-        self.user_since = 0
-
-    def __call__(self, prompt:str, images=None, **kwargs):
-        if self.step > 0:
-            prev_code, prev_file = (self.log[-1]['code'], self.log[-1]['file'])
-            prompt = f'{prompt}\n\n```python\n{prev_code}\n```\n'
-            input = (prompt, prev_file)
-        else:
-            input = (prompt, images)
-        self.ongoing = {'input':input, 'response':chat(*input, preload=self.preload, **(self.kwargs|kwargs))[0]}
-        self.ongoing.update(execute(self.ongoing['response'], f'agent_{self.step}.png'))
-        self.log.append(self.ongoing)
-        self.ongoing = None
-        self.step+=1
-        return self.log[-1]['response'], self.log[-1]['file']
-    
-    def end(self):
-        print('Agent session ended.')
-        agent_log = {
-            'log':self.log,
-            'step':self.step,
-            'ongoing':self.ongoing,
-        }
-        with open(f'agent_log.json', "w") as f:
-            json.dump(agent_log, f, indent=4)
-        self.reset()
 
 class Tic:
     def __init__(self):
@@ -140,7 +105,7 @@ class LogitStopper:
 class TokenStopper:
     def __init__(self, processor):
         self.tokenizer = processor.tokenizer
-        self.eos_id = self.tokenizer.eos_token_id
+        self.eos_id = 32007 # self.tokenizer.eos_token_id
         self.eos_rows = set()
     def __call__(self, token):
         if self.eos_id in token:
@@ -380,51 +345,6 @@ class Phi3VProcessor:
                 "image_sizes": mx.array(image_sizes),
                 "positions": mx.array(positions)}
 
-def interpolate_336(input):
-    def get_weights_and_indices(scale, out_size, in_size):
-        def cubic(x):
-            abs_x = np.abs(x)
-            abs_x2 = abs_x ** 2
-            abs_x3 = abs_x ** 3
-            f = ((1.5 * abs_x3 - 2.5 * abs_x2 + 1) * (abs_x <= 1) +
-                (-0.5 * abs_x3 + 2.5 * abs_x2 - 4 * abs_x + 2) * ((abs_x > 1) & (abs_x <= 2)))
-            return f
-        kernel_radius = 2
-        kernel_width = kernel_radius * 2
-        out_coordinates = np.linspace(0, in_size - 1, out_size)
-        in_coordinates = out_coordinates / scale
-        left_indices = np.floor(in_coordinates - 0.5).astype(np.int32)
-        right_indices = left_indices + 1
-        left_indices = np.clip(left_indices, 0, in_size - 1)
-        right_indices = np.clip(right_indices, 0, in_size - 1)
-        weights = np.zeros((out_size, kernel_width), dtype=np.float32)
-        indices = np.zeros((out_size, kernel_width), dtype=np.int32)
-        for i in range(out_size):
-            indices[i, 0] = left_indices[i]
-            indices[i, 1] = right_indices[i]
-            weights[i, 0] = cubic(in_coordinates[i] - left_indices[i])
-            weights[i, 1] = cubic(right_indices[i] - in_coordinates[i])
-
-            weight_sum = weights[i].sum()
-            if weight_sum != 0:
-                weights[i] /= weight_sum
-
-        return weights, indices
-    N, C, H, W = input.shape
-    out_hw = 336
-    output = np.zeros((N, C, out_hw, out_hw), dtype=input.dtype)
-    h_weights, h_indices = get_weights_and_indices(out_hw / H, out_hw, H)
-    w_weights, w_indices = get_weights_and_indices(out_hw / W, out_hw, W)
-    for n in range(N):
-        for c in range(C):
-            for i in range(out_hw):
-                for j in range(out_hw):
-                    h_kernel = input[n, c, h_indices[i]]
-                    w_kernel = h_kernel[:, w_indices[j]]
-                    output[n, c, i, j] = np.sum(h_weights[i][:, None] * w_weights[j] * w_kernel)
-
-    return output
-
 class Phi3VImageProcessor:
     def __init__(self):
         self.num_crops=16
@@ -463,7 +383,7 @@ class Phi3VImageProcessor:
         shapes = [[im.shape[1], im.shape[2]] for im in hd_images]
         num_img_tokens = [int((h//336*w//336+1)*144 + 1 + (h//336+1)*12) for h, w in shapes]
         # global_image = [torch.nn.functional.interpolate(torch.from_numpy(im[None]), size=(336, 336), mode='bicubic').numpy() for im in hd_images]
-        global_image = [interpolate_336(im[None]) for im in hd_images]
+        global_image = [self.interpolate_336(im[None]) for im in hd_images]
         hd_images_reshape = [im
             .reshape(1, 3, h//336, 336, w//336, 336)
             .transpose(0,2,4,1,3,5)
@@ -472,6 +392,52 @@ class Phi3VImageProcessor:
         hd_images_reshape = [np.concatenate([_global_image, _im], axis=0) for _global_image, _im in zip(global_image, hd_images_reshape)]
         image_transformed = np.stack([pad_to_max_num_crops_tensor(im) for im in hd_images_reshape], axis=0)
         return {"pixel_values": image_transformed, "image_sizes": shapes, "num_img_tokens": num_img_tokens}
+
+    @staticmethod
+    def interpolate_336(input):
+        def get_weights_and_indices(scale, out_size, in_size):
+            def cubic(x):
+                abs_x = np.abs(x)
+                abs_x2 = abs_x ** 2
+                abs_x3 = abs_x ** 3
+                f = ((1.5 * abs_x3 - 2.5 * abs_x2 + 1) * (abs_x <= 1) +
+                    (-0.5 * abs_x3 + 2.5 * abs_x2 - 4 * abs_x + 2) * ((abs_x > 1) & (abs_x <= 2)))
+                return f
+            kernel_radius = 2
+            kernel_width = kernel_radius * 2
+            out_coordinates = np.linspace(0, in_size - 1, out_size)
+            in_coordinates = out_coordinates / scale
+            left_indices = np.floor(in_coordinates - 0.5).astype(np.int32)
+            right_indices = left_indices + 1
+            left_indices = np.clip(left_indices, 0, in_size - 1)
+            right_indices = np.clip(right_indices, 0, in_size - 1)
+            weights = np.zeros((out_size, kernel_width), dtype=np.float32)
+            indices = np.zeros((out_size, kernel_width), dtype=np.int32)
+            for i in range(out_size):
+                indices[i, 0] = left_indices[i]
+                indices[i, 1] = right_indices[i]
+                weights[i, 0] = cubic(in_coordinates[i] - left_indices[i])
+                weights[i, 1] = cubic(right_indices[i] - in_coordinates[i])
+
+                weight_sum = weights[i].sum()
+                if weight_sum != 0:
+                    weights[i] /= weight_sum
+
+            return weights, indices
+        N, C, H, W = input.shape
+        out_hw = 336
+        output = np.zeros((N, C, out_hw, out_hw), dtype=input.dtype)
+        h_weights, h_indices = get_weights_and_indices(out_hw / H, out_hw, H)
+        w_weights, w_indices = get_weights_and_indices(out_hw / W, out_hw, W)
+        for n in range(N):
+            for c in range(C):
+                for i in range(out_hw):
+                    for j in range(out_hw):
+                        h_kernel = input[n, c, h_indices[i]]
+                        w_kernel = h_kernel[:, w_indices[j]]
+                        output[n, c, i, j] = np.sum(h_weights[i][:, None] * w_weights[j] * w_kernel)
+
+        return output
 
 class Phi3ImageEmbedding(nn.Module):
     CLIP_VIT_LARGE_PATCH14_336_CONFIG = SimpleNamespace(
@@ -517,7 +483,6 @@ class Phi3ImageEmbedding(nn.Module):
             txt_embeds[positions[idx][0], positions[idx][1] : positions[idx][1] + cnt] = output_imgs[i]
             idx += cnt
         return txt_embeds
-
 
 class Phi3Attention(nn.Module):
     def __init__(self, config):
@@ -603,6 +568,7 @@ class SuRoPE:
 
 class KVCache:
     def __init__(self, config, x, max_tokens):
+        self.max_tokens = max_tokens
         self.use_quantized_cache = getattr(config, "use_quantized_cache", False)
         self.offset = 0
         shape = (2, x.shape[0], config.num_key_value_heads, x.shape[1]+max_tokens, config.hidden_size // config.num_key_value_heads)
@@ -611,6 +577,8 @@ class KVCache:
         else:
             self.kv = mx.zeros(shape, mx.float32)
     def __call__(self, keys, values):
+        if self.max_tokens  < 1:
+            return keys, values
         B, N, L, D = keys.shape
         new_offset = self.offset + L
         if self.use_quantized_cache: 
@@ -674,7 +642,7 @@ class Phi3VLModel(nn.Module):
         self.config = config
         self.model = Phi3VModel(config)
         self.lm_head = nn.Linear(config.hidden_size, config.vocab_size, bias=False)
-    def __call__(self, input_ids, pixel_values=None, image_sizes=None, positions=None, cache=None, pids=None, mask=None, max_tokens=None):
+    def __call__(self, input_ids, pixel_values=None, image_sizes=None, positions=None, cache=None, pids=None, mask=None, max_tokens=0):
         x, cache = self.model(input_ids, pixel_values, image_sizes, positions, cache, pids, mask, max_tokens)
         return self.lm_head(x), cache
     @property
@@ -694,14 +662,36 @@ def _linear_to_lora_layers(model, lora_layers, config):
         lora_layers = [(k, to_lora(m)) for k, m in l.named_modules() if k == "self_attn.qkv_proj"]
         l.update_modules(tree_unflatten(lora_layers))
 
-def _load_text(root_url, list_doc, is_code=False, join=True):
-    list_str = [response.text for file_url in list_doc if (response := requests.get(f'{root_url}/{file_url}')).status_code == 200]
-    if is_code:
-        list_str = [f".. code-block:: python\n    :caption: {filename}\n\n{textwrap.indent(code, "    ")}" for filename, code in zip(list_doc, list_str)]
-    if join is False:
-        return list_str
-    return '\n\n'.join(list_str)
+def _load(model_path='phi3v', adapter_path=None, **kwargs):
+    model_cfg = _get_cfg(f"{model_path}/config.json", **kwargs)
+    model = Phi3VLModel(model_cfg)
+    nn.quantize(model, model_cfg.quantized['group_size'], model_cfg.quantized['bits']) if getattr(model_cfg, 'quantized', False) else None
+    model.load_weights(_get_wt(model_path, model_cfg))
+    if adapter_path:
+        lora_cfg = _get_cfg(f"{adapter_path}/adapter_config.json")
+        _linear_to_lora_layers(model, lora_cfg.lora_layers, lora_cfg.lora_parameters)
+        model.load_weights(f'{adapter_path}/adapters.safetensors', strict=False)
+    mx.eval(model.parameters())
+    model.eval()
+    return model, Phi3VProcessor(model_path)
 
+def _quantize(from_path='phi3v', to_path='quantized_phi3v', q_group_size=64, q_bits=4):
+    if not os.path.exists(from_path):
+        snapshot_download(repo_id="microsoft/Phi-3-vision-128k-instruct", allow_patterns=["*.safetensors", "*.json"], local_dir=from_path)
+    model_cfg = _get_cfg(f"{from_path}/config.json")
+    model = Phi3VLModel(model_cfg)
+    model.load_weights(_get_wt(from_path, model_cfg))
+    nn.quantize(model, q_group_size, q_bits)
+    quantization_config = {"group_size": q_group_size, "bits": q_bits}
+    quantized_weights = dict(tree_flatten(model.parameters()))
+    del model
+    os.makedirs(to_path, exist_ok=True)
+    for f in glob.glob(f"{from_path}/*.json"):
+        copy(f, to_path)
+    with open(f"{to_path}/config.json", "w") as f:
+        json.dump(vars(model_cfg)|{'quantized':quantization_config, 'sanitized':True}, f, indent=4)
+    mx.save_safetensors(f'{to_path}/quantized_model.safetensors', quantized_weights)
+    
 def _load_image(image_source): # copied from https://github.com/Blaizzy/mlx-vlm/blob/main/mlx_vlm/utils.py
     if isinstance(image_source, BytesIO):
         try:
@@ -727,7 +717,16 @@ def _load_image(image_source): # copied from https://github.com/Blaizzy/mlx-vlm/
             f"The image {image_source} must be a valid URL or existing file."
         )
 
-def _apply_chat_template(prompt, images, verbose):
+def _get_api_output_path(process):
+    if '<|api_output|>' in process.stdout:
+        return process.stdout.strip().split('<|api_output|>', 1)[1]
+    else:
+        return None
+
+def _apply_chat_template(prompt, images, verbose, apply_chat_template=True):
+    if apply_chat_template is False:
+        print(f'### Prompt ###\n{prompt}\n### Images ###\n{images}\n### Output ###') if verbose else None
+        return prompt, images
     if images is not None:
         images = [_load_image(i) for i in images] if isinstance(images, list) else [_load_image(images)]
         img_prompt = '\n'.join([f'<|image_{i+1}|>' for i in range(len(images))]) + '\n'
@@ -735,16 +734,9 @@ def _apply_chat_template(prompt, images, verbose):
         img_prompt = ''
     prompt = [prompt] if isinstance(prompt, str) else prompt
     prompt = [f"<|user|>\n{img_prompt}{i}<|end|>\n<|assistant|>\n" for i in prompt]
-    print(f'### Prompt ###\n{"\n".join(map(str.strip, prompt)).strip()}\n### Images ###\n{'\n'.join(map(str, images)) if images else "None"}\n### Output ###') if verbose else None
+    print(f'### Prompt ###\n{"\n".join(map(str.strip, prompt)).strip()}\n### Images ###\n{"\n".join(map(str, images)) if images else "None"}\n### Output ###') if verbose else None
     prompt = prompt[0] if len(prompt) == 1 else prompt
     return prompt, images
-
-def _preload(quantize_model=False, quantize_cache=False, adapter_path=None, **kwargs):
-    if (quantize_model is True) and (not os.path.exists('quantized_phi3v')):
-        # quantize()
-        snapshot_download(repo_id="JosefAlbers/Phi-3-vision-128k-instruct-mlx", allow_patterns=["*.safetensors", "*.json"], local_dir='quantized_phi3v')
-    model_path='quantized_phi3v' if quantize_model is True else 'phi3v'
-    return load(model_path=model_path, use_quantized_cache=quantize_cache, adapter_path=adapter_path)
 
 def _get_cfg(json_path, **kwargs):
     try:
@@ -759,22 +751,7 @@ def _get_wt(model_path, model_cfg):
         return [(k, v) for wf in glob.glob(f"{model_path}/*.safetensors") for k, v in mx.load(wf).items()]
     return [(k, v.transpose(0, 2, 3, 1) if "patch_embedding.weight" in k else v) for wf in glob.glob(f"{model_path}/*.safetensors") for k, v in mx.load(wf).items()]
 
-def load(model_path='phi3v', adapter_path=None, **kwargs):
-    if not os.path.exists(model_path):
-        snapshot_download(repo_id="microsoft/Phi-3-vision-128k-instruct", allow_patterns=["*.safetensors", "*.json"], local_dir=model_path)
-    model_cfg = _get_cfg(f"{model_path}/config.json", **kwargs)
-    model = Phi3VLModel(model_cfg)
-    nn.quantize(model, model_cfg.quantized['group_size'], model_cfg.quantized['bits']) if getattr(model_cfg, 'quantized', False) else None
-    model.load_weights(_get_wt(model_path, model_cfg))
-    if adapter_path:
-        lora_cfg = _get_cfg(f"{adapter_path}/adapter_config.json")
-        _linear_to_lora_layers(model, lora_cfg.lora_layers, lora_cfg.lora_parameters)
-        model.load_weights(f'{adapter_path}/adapters.safetensors', strict=False)
-    mx.eval(model.parameters())
-    model.eval()
-    return model, Phi3VProcessor(model_path)
-
-def generate(model, processor, prompt, images=None, max_tokens=100, verbose=True, return_tps=False, early_stop=100, stream=True):
+def _generate(model, processor, prompt, images=None, max_tokens=1000, verbose=True, return_tps=False, early_stop=False, stream=True):
     if images is not None and isinstance(prompt, list):
         raise ValueError('Images cannot be provided when prompt is a list')
     tic = Tic()
@@ -809,30 +786,91 @@ def generate(model, processor, prompt, images=None, max_tokens=100, verbose=True
         return prompt_tps, gen_tps
     return result
     
-def execute(code_string, plot_path='test_plot.png'):
+def _execute(code_string, file_prefix=0):
     code_string = '\n'.join(re.findall(r"```python\n(.*?)```", code_string, re.DOTALL))
+    if len(code_string) < 1:
+        return None, None, None, None
     code_string = re.sub(r'plt\.savefig\(.*?\)', 'plt.show()', code_string)
-    output_path = plot_path if 'plt.show()' in code_string else None # `[] csv, json, etc
+    plot_path = f'{file_prefix}.png' if 'plt.show()' in code_string else None
     code_to_run = code_string.replace("plt.show()", f"plt.savefig('{plot_path}')")
     process = subprocess.run(["python", "-c", code_to_run], capture_output=True, text=True)
-    return {'code':code_string.strip(), 'file':output_path, 'sout':process.stdout.strip(), 'serr':process.stderr.strip()}
+    output_path = None
+    stderr = process.stderr.strip()
+    if len(stderr) < 1:
+        output_path = plot_path if plot_path else _get_api_output_path(process)
+        stderr = None    
+    return code_string.strip(), output_path, process.stdout.strip(), stderr
 
-def quantize(from_path='phi3v', to_path='quantized_phi3v', q_group_size=64, q_bits=4):
-    if not os.path.exists(from_path):
-        snapshot_download(repo_id="microsoft/Phi-3-vision-128k-instruct", allow_patterns=["*.safetensors", "*.json"], local_dir=from_path)
-    model_cfg = _get_cfg(f"{from_path}/config.json")
-    model = Phi3VLModel(model_cfg)
-    model.load_weights(_get_wt(from_path, model_cfg))
-    nn.quantize(model, q_group_size, q_bits)
-    quantization_config = {"group_size": q_group_size, "bits": q_bits}
-    quantized_weights = dict(tree_flatten(model.parameters()))
-    del model
-    os.makedirs(to_path, exist_ok=True)
-    for f in glob.glob(f"{from_path}/*.json"):
-        copy(f, to_path)
-    with open(f"{to_path}/config.json", "w") as f:
-        json.dump(vars(model_cfg)|{'quantized':quantization_config, 'sanitized':True}, f, indent=4)
-    mx.save_safetensors(f'{to_path}/quantized_model.safetensors', quantized_weights)
+def load_text(file_path):
+    file_path = file_path.strip()
+    parsed_url = urlparse(file_path)
+    if parsed_url.scheme in ('http', 'https'):
+        response = requests.get(file_path)
+        if response.status_code == 200:
+            return_text = response.text
+        else:
+            raise Exception(f"Failed to retrieve URL: {file_path}, Status code: {response.status_code}")
+    else:
+        path = Path(file_path)
+        if path.is_file():
+            return_text = path.read_text()
+        else:
+            return_text = file_path
+    return return_text.replace('"', "'")
+
+def chatui(agent=None):
+    agent = Agent() if agent is None else agent
+    def add_message(history, message):
+        for x in message["files"]:
+            history.append(((x,), None))
+        if message["text"] is not None:
+            history.append((message["text"], None))
+        return history, gr.MultimodalTextbox(value=None, interactive=False)
+
+    def bot(history):
+        def _get_input(history):
+            return history[-1][0], [i[0][0] for i in history[agent.user_since:-1]] if agent.user_since+1 < len(history) else None
+        agent_input = _get_input(history)
+        agent_output = agent(*agent_input)
+        responses, files = agent_output['responses'], agent_output['files']
+        if responses is not None:
+            for response in responses:
+                response = response[:response.find('<|end|>')] if '<|end|>' in response else response
+                lines = response.splitlines()
+                non_empty_lines = [line for line in lines if line.strip()]
+                response = '\n'.join(non_empty_lines)
+                history.append((None, response))
+        if files is not None:
+            for file in files:
+                if file is not None:
+                    history.append((None, (file,)))
+        agent.user_since = len(history)
+        return history
+
+    def reset():
+        agent.end()
+        return []
+
+    with gr.Blocks(css="footer{display:none !important}") as demo:
+        chatbot = gr.Chatbot(
+            [],
+            elem_id="chatbot",
+            bubble_full_width=False,
+            height='80vh'
+        )
+
+        chat_input = gr.MultimodalTextbox(interactive=True, file_types=["image"], placeholder="Enter message or upload file...", show_label=False)
+
+        close_btn = gr.Button("Reset", variant="stop")
+
+        chat_msg = chat_input.submit(add_message, [chatbot, chat_input], [chatbot, chat_input])
+        bot_msg = chat_msg.then(bot, chatbot, chatbot, api_name="bot_response")
+        bot_msg.then(lambda: gr.MultimodalTextbox(interactive=True), None, [chat_input])
+
+        close_btn.click(reset, None, chatbot) 
+
+    demo.queue()
+    demo.launch(inbrowser=True, inline=True)
 
 def train_lora(lora_layers=5, lora_rank=16, epochs=10, lr=1e-4, warmup=.5, mask_ratios=[.0], adapter_path='adapters', dataset_path="JosefAlbers/akemiH_MedQA_Reason"): # or mask_ratios=[.0, .1, .3, .5]
     def _prompt(example):
@@ -922,9 +960,9 @@ def test_lora(dataset_path="JosefAlbers/akemiH_MedQA_Reason"):
         question = example['input']
         _question = question.rsplit(' A: ', 1)[0].strip()
         prompt_recall = f"<|user|>\n{_question}<|end|>\n<|assistant|>"
-        example['recall'] = generate(model, processor, prompt_recall, max_tokens=30, verbose=False)[0]
+        example['recall'] = _generate(model, processor, prompt_recall, max_tokens=30, verbose=False)[0]
         prompt_answer = f"<|user|>\n{question}<|end|>\n<|assistant|>\nThe correct answer is"
-        example['attempt'] = _get_alphabet(generate(model, processor, prompt_answer, max_tokens=3, verbose=False)[0])
+        example['attempt'] = _get_alphabet(_generate(model, processor, prompt_answer, max_tokens=3, verbose=False)[0])
         _summary = example['summary'].strip().split('\n', 1)[0].strip()
         example['result'] = f"Question: {_question}\n- Taught: {_summary}\n- Recall: {example['recall']}\n- Answer: {example['output']}\n- Attempt: {example['attempt']}\n- Correct: {example['output'] == example['attempt']}"
         return example
@@ -935,55 +973,6 @@ def test_lora(dataset_path="JosefAlbers/akemiH_MedQA_Reason"):
     del model
     del processor
 
-def chat(prompt, images=None, preload=None, quantize_model=False, quantize_cache=False, adapter_path=None, max_tokens=500, verbose=True, return_tps=False, early_stop=100, stream=True):
-    preload = _preload(quantize_model, quantize_cache, adapter_path) if preload is None else preload
-    return generate(*preload, *_apply_chat_template(prompt, images, verbose), max_tokens=max_tokens, verbose=verbose, return_tps=return_tps, early_stop=early_stop, stream=stream)
-
-def chatui():
-    agent = Agent(max_tokens=1000, early_stop=False)
-
-    def add_message(history, message):
-        for x in message["files"]:
-            history.append(((x,), None))
-        if message["text"] is not None:
-            history.append((message["text"], None))
-        return history, gr.MultimodalTextbox(value=None, interactive=False)
-
-    def bot(history):
-        def _get_input(history):
-            return history[-1][0], [i[0][0] for i in history[agent.user_since:-1]] if agent.user_since+1 < len(history) else None
-        agent_input = _get_input(history)
-        response, file = agent(*agent_input)
-        history.append((None, response))
-        if file is not None:
-            history.append((None, (file,)))
-        agent.user_since = len(history)
-        return history
-
-    def reset():
-        agent.end()
-        return []
-
-    with gr.Blocks() as demo:
-        chatbot = gr.Chatbot(
-            [],
-            elem_id="chatbot",
-            bubble_full_width=False,
-            height='70vh'
-        )
-
-        chat_input = gr.MultimodalTextbox(interactive=True, file_types=["image"], placeholder="Enter message or upload file...", show_label=False)
-
-        close_btn = gr.Button("Reset", variant="stop")
-
-        chat_msg = chat_input.submit(add_message, [chatbot, chat_input], [chatbot, chat_input])
-        bot_msg = chat_msg.then(bot, chatbot, chatbot, api_name="bot_response")
-        bot_msg.then(lambda: gr.MultimodalTextbox(interactive=True), None, [chat_input])
-
-        close_btn.click(reset, None, chatbot) 
-
-    demo.queue()
-    demo.launch(inbrowser=True, inline=True)
 
 def benchmark():
     prompts = [
@@ -995,11 +984,6 @@ def benchmark():
             "Write a mystery horror.",
             "Write a Neurology ICU Admission Note."
             ], None),
-        ("What is shown in the first image?", [
-            "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcTSyGT7IkhN12m2EnWGOoqxilYcwnnEWECm_A&s",
-            "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcSWWjEYFx5X88A7K4th2o_dNkQu9Ipk6q98sA&s",
-            "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcREhh6bTTDNosQrJvAN6LZmPG98k4dYdt14DA&s",
-            ]),
     ]
     results = {
         'vanilla': [],
@@ -1018,33 +1002,102 @@ def benchmark():
             elif method == 'lora':
                 kwargs['adapter_path'] = 'adapters'
 
-            prompt_tps, gen_tps = chat(*prompt, max_tokens=100, early_stop=100, **kwargs)
+            prompt_tps, gen_tps = generate(*prompt, max_tokens=100, early_stop=100, **kwargs)
             results[method].append([i, prompt_tps, gen_tps])
 
     with open('benchmark.json', 'w') as f:
         json.dump(results, f, indent=4)
 
-"""
-Examples:
+def add_code(prompt, codes):
+    return prompt if codes is None else [f'{prompt}\n\n```python\n{code}\n```\n' for code in codes]
 
-# `chat
-chat('Write a cosmic horror.') 
-chat('What is shown in this image?', 
-    'https://assets-c4akfrf5b4d3f4b7.z01.azurefd.net/assets/2024/04/BMDataViz_661fb89f3845e.png')
-chat([
-    "Write an executive summary for a communications business plan",
-    "Write a resume.", 
-    "Write a mystery horror.",
-    "Write a Neurology ICU Admission Note.",])
-chat("What is shown in the first image?", [ 
-    "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcTSyGT7IkhN12m2EnWGOoqxilYcwnnEWECm_A&s",
-    "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcSWWjEYFx5X88A7K4th2o_dNkQu9Ipk6q98sA&s",
-    "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcREhh6bTTDNosQrJvAN6LZmPG98k4dYdt14DA&s",])
+def load(quantize_model=False, quantize_cache=False, adapter_path=None, **kwargs):
+    if not os.path.exists('phi3v'):
+        snapshot_download(repo_id="microsoft/Phi-3-vision-128k-instruct", allow_patterns=["*.safetensors", "*.json"], local_dir='phi3v')
+        _quantize()
+        train_lora(1,1,1)
+    model_path='quantized_phi3v' if quantize_model is True else 'phi3v'
+    return _load(model_path=model_path, use_quantized_cache=quantize_cache, adapter_path=adapter_path)
 
-# `generate -> execute -> visual feedback
-agent = Agent(max_tokens=1000, early_stop=False)
-agent('Plot a Lissajous Curve.')
-agent('Modify the code to plot 3:4 frequency.')
-agent('Modify the code to plot pi/4 phase difference.')
-agent.end()
-"""
+def get_api(prompt, n_topk=1, verbose=True):
+    vdb = VDB()
+    codes = vdb(prompt)
+    prompt = [prompt] if isinstance(prompt, str) else prompt
+    codes = [code.format(prompt=prompt[i].split('<|api_input|>')[1]) for i, sublist in enumerate(codes) for code in sublist]
+    print('Obtained api codes:\n', codes) if verbose is True else None
+    return codes
+
+def generate(prompt, images=None, preload=None, quantize_model=False, quantize_cache=False, adapter_path=None, max_tokens=1000, verbose=True, return_tps=False, early_stop=False, stream=True, apply_chat_template = True):
+    if '<|api_input|>' in prompt:
+        return get_api(prompt)
+    preload = load(quantize_model, quantize_cache, adapter_path) if preload is None else preload
+    return _generate(*preload, *_apply_chat_template(prompt, images, verbose, apply_chat_template), max_tokens=max_tokens, verbose=verbose, return_tps=return_tps, early_stop=early_stop, stream=stream)
+
+def execute(code_strings, file_prefix=0, verbose=True):
+    results = [_execute(code_string, f'{file_prefix}_{i}') for i, code_string in enumerate(code_strings)]
+    print('Execution results:', results) if verbose is True else None
+    return {k: [r[i] for r in results] for i, k in enumerate(['codes', 'files', 'souts', 'serrs'])}
+
+class Agent:
+    _default_toolchain = """
+        prompt = add_code(prompt, codes)
+        responses = generate(prompt, images)
+        files, codes = execute(responses, step)
+        """
+    def __init__(self, toolchain=None, enable_api=True, **kwargs):
+        toolchain = self._default_toolchain if toolchain is None else toolchain
+        self.set_toolchain(toolchain)
+        self.kwargs = kwargs|{'preload':load(**kwargs)}
+        self.enable_api = enable_api
+        self.reset()
+        
+    def __call__(self, prompt:str, images=None):
+        prompt = prompt.replace('"', '<|api_input|>') if self.enable_api else prompt
+        self.ongoing.update({'prompt':prompt})
+        if images is not None:
+            self.ongoing.update({'images':images})
+        for tool in self.toolchain:
+            _returned = tool['fxn'](*[self.ongoing.get(i, None) for i in tool['args']], **{k:v for k,v in self.kwargs.items() if k in inspect.signature(tool['fxn']).parameters.keys()})
+            if isinstance(_returned, dict):
+                self.ongoing.update({k:_returned[k] for k in tool['out']})
+            else:
+                self.ongoing.update({k:_returned for k in tool['out']})
+        self.log_step()
+        return {i:self.ongoing.get(i, None) for i in self.list_outs}
+
+    def reset(self):
+        self.log = []
+        self.ongoing = {'step':0}
+        self.user_since = 0
+
+    def log_step(self):
+        self.log.append({**self.ongoing})
+        with open(f'agent_log.json', "w") as f:
+            json.dump(self.log, f, indent=4)
+        self.ongoing = {k:None if v==[None] else v for k,v in self.ongoing.items()}
+        self.ongoing['step']+=1
+    
+    def end(self):
+        self.ongoing.update({'END':'END'})
+        self.log_step()
+        self.reset()
+
+    def set_toolchain(self, s):
+        def _parse_toolchain(s):
+            s = s.strip().rstrip(')')
+            out_part, fxn_part = s.split('=')
+            fxn_name, args_part = fxn_part.split('(')
+            
+            return {
+                'fxn': eval(fxn_name.strip()),
+                'args': [arg.strip() for arg in args_part.split(',')],
+                'out': [out.strip() for out in out_part.split(',')]
+            }
+
+        def _parse_return(s):
+            if 'return ' not in s:
+                return ['responses', 'files']
+            return [i.strip() for i in s.split('return ')[1].split(',')]
+
+        self.toolchain = [_parse_toolchain(i) for i in s.split('\n') if '=' in i]
+        self.list_outs = _parse_return(s)
