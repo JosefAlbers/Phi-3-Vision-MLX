@@ -124,7 +124,7 @@ class Bert(nn.Module):
         return y, mx.tanh(self.pooler(y[:, 0]))
 
 
-class Model:
+class GteModel:
     def __init__(self) -> None:
         model_path = snapshot_download(repo_id="vegaluisjose/mlx-rag")
         with open(f"{model_path}/config.json") as f:
@@ -189,7 +189,7 @@ print('<|api_output|>'+result)
 
 class VDB:
     def __init__(self, list_api=None, n_line=1):
-        self.embed = Model()
+        self.embed = GteModel()
         if list_api is None:
             self.list_api = _list_api
             list_src = _list_api if n_line < 0 else ['\n'.join(s.split('\n')[:n_line]) for s in _list_api]

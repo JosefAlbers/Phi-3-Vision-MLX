@@ -39,7 +39,7 @@ agent('What is shown in this image?', 'https://collectionapi.metmuseum.org/api/c
 agent.end()
 ```
 
-![Alt text](assets/vqa.png)
+![Alt text](https://raw.githubusercontent.com/JosefAlbers/Phi-3-Vision-MLX/main/assets/vqa.png)
 
 ### **Generative Feedback Loop**
 
@@ -51,7 +51,7 @@ agent('Modify the code to plot 3:4 frequency')
 agent.end()
 ```
 
-![Alt text](assets/coding_agent.png)
+![Alt text](https://raw.githubusercontent.com/JosefAlbers/Phi-3-Vision-MLX/main/assets/coding_agent.png)
 
 ### **API Tool Use**
 
@@ -64,7 +64,7 @@ agent('Speak "People say nothing is impossible, but I do nothing every day."')
 agent.end()
 ```
 
-![Alt text](assets/api_agent.png)
+![Alt text](https://raw.githubusercontent.com/JosefAlbers/Phi-3-Vision-MLX/main/assets/api_agent.png)
 
 ### **Custom Toolchain**
 
@@ -134,6 +134,7 @@ _, images = agent(user_input)
 You can also have multiple agents interacting to complete a task:
 
 ```python
+# Continued from Example 2
 agent_writer = Agent(early_stop=100)
 agent_writer(f'Write a stock analysis report on: {user_input}', images)
 ```
@@ -172,8 +173,6 @@ train_lora(lora_layers=5, lora_rank=16, epochs=10, lr=1e-4, warmup=.5, mask_rati
 ```
 
 ![Alt text](https://raw.githubusercontent.com/JosefAlbers/Phi-3-Vision-MLX/main/assets/train_log.png)
-
-Use the fine-tuned model:
 
 ```python
 generate("Write a cosmic horror.", adapter_path='adapters')

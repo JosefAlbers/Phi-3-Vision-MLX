@@ -6,9 +6,9 @@ with open("requirements.txt") as f:
 setup(
     name='phi-3-vision-mlx',
     url='https://github.com/JosefAlbers/Phi-3-Vision-MLX', 
-    # py_modules=['phi_3_vision_mlx'],
+    py_modules=['phi_3_vision_mlx', 'gte'],
     packages=find_packages(), 
-    version='0.0.6-alpha',
+    version='0.0.6',
     readme="README.md",
     author_email="albersj66@gmail.com",
     description="Phi-3-Vision on Apple silicon with MLX",
