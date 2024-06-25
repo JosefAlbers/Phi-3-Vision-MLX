@@ -7,6 +7,12 @@ Author: Josef Albers
 More examples here: https://github.com/JosefAlbers/Phi-3-Vision-MLX
 '''
 
+import sys
+import os
+
+# Add the parent folder of phi_3_vision_mlx module to the Python module search path
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+
 from phi_3_vision_mlx import Agent
 
 # Visual Question Answering (VQA)
