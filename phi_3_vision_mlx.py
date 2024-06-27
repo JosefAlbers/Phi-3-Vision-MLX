@@ -734,7 +734,10 @@ def _apply_chat_template(prompt, images, verbose, apply_chat_template=True):
         img_prompt = ''
     prompt = [prompt] if isinstance(prompt, str) else prompt
     prompt = [f"<|user|>\n{img_prompt}{i}<|end|>\n<|assistant|>\n" for i in prompt]
-    print(f'### Prompt ###\n{"\n".join(map(str.strip, prompt)).strip()}\n### Images ###\n{"\n".join(map(str, images)) if images else "None"}\n### Output ###') if verbose else None
+    if verbose:
+        prompt_str = "\n".join(map(str.strip, prompt)).strip()
+        images_str = "\n".join(map(str, images)) if images else "None"
+        print(f'### Prompt ###\n{prompt_str}\n### Images ###\n{images_str}\n### Output ###')
     prompt = prompt[0] if len(prompt) == 1 else prompt
     return prompt, images
 
