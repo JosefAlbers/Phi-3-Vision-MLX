@@ -14,6 +14,9 @@ from transformers import BertTokenizer
 
 import datasets
 import numpy as np
+import os
+
+PATH_GTE = 'models/gte'
 
 def average_pool(last_hidden_state: mx.array, attention_mask: mx.array) -> mx.array:
     last_hidden = mx.multiply(last_hidden_state, attention_mask[..., None])
@@ -123,15 +126,17 @@ class Bert(nn.Module):
         y = self.encoder(x, attention_mask)
         return y, mx.tanh(self.pooler(y[:, 0]))
 
-
 class GteModel:
     def __init__(self) -> None:
-        model_path = snapshot_download(repo_id="vegaluisjose/mlx-rag")
+        model_path = PATH_GTE
+        if not os.path.exists(model_path):
+            snapshot_download(repo_id="vegaluisjose/mlx-rag", local_dir=model_path)
+            snapshot_download(repo_id="thenlper/gte-large", allow_patterns=["vocab.txt", "*.json"], local_dir=model_path)
         with open(f"{model_path}/config.json") as f:
             model_config = ModelConfig(**json.load(f))
         self.model = Bert(model_config)
         self.model.load_weights(f"{model_path}/model.npz")
-        self.tokenizer = BertTokenizer.from_pretrained("thenlper/gte-large")
+        self.tokenizer = BertTokenizer.from_pretrained(model_path)
 
     def __call__(self, input_text: List[str]) -> mx.array:
         tokens = self.tokenizer(input_text, return_tensors="np", padding=True)

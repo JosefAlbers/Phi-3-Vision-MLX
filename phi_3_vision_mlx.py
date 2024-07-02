@@ -17,7 +17,7 @@ import matplotlib.pyplot as plt
 from urllib.parse import urlparse
 from io import BytesIO
 from pathlib import Path
-from huggingface_hub import snapshot_download
+from huggingface_hub import snapshot_download, InferenceClient
 from shutil import copy
 from mlx.utils import tree_flatten, tree_unflatten
 from PIL import Image, ImageOps
@@ -28,8 +28,12 @@ import time
 import logging
 import inspect
 import gradio as gr
+from gradio_client import Client
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 logging.getLogger("transformers").setLevel(logging.ERROR)
+
+PATH_ORIGINAL_PHI3_V = 'models/phi3_v'
+PATH_QUANTIZED_PHI3_V = 'models/quantized_phi3_v'
 
 class Tic:
     def __init__(self):
@@ -133,7 +137,7 @@ class TrainingCallback:
         self.train_log['step_i'].append(self.current_step)
         self.train_log['step_loss'].append(step_loss)
         self.sum_loss += step_loss
-        
+
         if self.current_step % self.sum_every == 0:
             avg_loss = self.sum_loss / self.sum_every
             self.sum_loss = 0.0
@@ -159,7 +163,7 @@ class TrainingCallback:
         ax2.plot(self.lr_schedule)
         ax2.ticklabel_format(axis='y', style='sci')
         ax2.set_title('Learning Rate Schedule')
-        plt.tight_layout() 
+        plt.tight_layout()
         fig.savefig(f'train_log.png')
         print(f"Training log saved to {self.adapter_path}")
         print(f"Total training time: {train_log['train_time']:.2f} seconds")
@@ -330,7 +334,7 @@ class Phi3VProcessor:
         prompt_chunks = self.tokenizer(re.split(pattern, texts)).input_ids
         num_img_tokens = images['num_img_tokens']
         images, image_sizes = images['pixel_values'], images['image_sizes']
-        image_tags = re.findall(pattern, texts) 
+        image_tags = re.findall(pattern, texts)
         image_ids = [int(s.split("|")[1].split("_")[-1]) for s in image_tags]
         image_ids_pad = [[-iid]*num_img_tokens[iid-1] for iid in image_ids]
         image_ids_pad = image_ids_pad + [[]] if len(prompt_chunks) > len(image_ids_pad) else image_ids_pad
@@ -341,7 +345,7 @@ class Phi3VProcessor:
         input_ids = np.array(input_ids)[None]
         positions = np.argwhere(input_ids < 0)
         return {"input_ids": mx.array(input_ids),
-                "pixel_values": mx.array(images), 
+                "pixel_values": mx.array(images),
                 "image_sizes": mx.array(image_sizes),
                 "positions": mx.array(positions)}
 
@@ -350,7 +354,7 @@ class Phi3VImageProcessor:
         self.num_crops=16
         self.image_mean=np.array([0.48145466, 0.4578275, 0.40821073])
         self.image_std=np.array([0.26862954, 0.26130258, 0.27577711])
-    
+
     def __call__(self, images):
         def HD_transform(img):
             img = img.convert('RGB')
@@ -379,7 +383,7 @@ class Phi3VImageProcessor:
                 pad = np.zeros((max_crops - B, 3, H, W))
                 images = np.concatenate([images, pad], axis=0)
             return images
-        hd_images = [HD_transform(img) for img in images] 
+        hd_images = [HD_transform(img) for img in images]
         shapes = [[im.shape[1], im.shape[2]] for im in hd_images]
         num_img_tokens = [int((h//336*w//336+1)*144 + 1 + (h//336+1)*12) for h, w in shapes]
         # global_image = [torch.nn.functional.interpolate(torch.from_numpy(im[None]), size=(336, 336), mode='bicubic').numpy() for im in hd_images]
@@ -470,7 +474,7 @@ class Phi3ImageEmbedding(nn.Module):
             h, w = img_sizes[_bs]
             B_ = h * w
             def _reshape_and_concatenate(img, shape, tile_shape):
-                return mx.concatenate([img.reshape(shape).transpose(0, 1, 3, 2, 4, 5).reshape(tile_shape), mx.tile(self.sub_GN, (1, tile_shape[1], 1, 1))], axis=2).reshape(1, -1, 4 * C) 
+                return mx.concatenate([img.reshape(shape).transpose(0, 1, 3, 2, 4, 5).reshape(tile_shape), mx.tile(self.sub_GN, (1, tile_shape[1], 1, 1))], axis=2).reshape(1, -1, 4 * C)
             glb_img = _reshape_and_concatenate( img_features[_bs, :1], (1, H//2, 2, H//2, 2, C), (1, H//2, H//2, 4*C) )
             sub_img = _reshape_and_concatenate( img_features[_bs, 1:B_+1], (B_, H//2, 2, H//2, 2, C), (1, h*12, w*12, 4*C) )
             x = mx.concatenate([sub_img, self.glb_GN, glb_img], axis=1)
@@ -501,7 +505,7 @@ class Phi3Attention(nn.Module):
     def __call__(self, x, cache, cos, sin, mask):
         @mx.compile
         def _rotate_half(x, cos, sin):
-            midpoint = x.shape[-1] // 2  
+            midpoint = x.shape[-1] // 2
             x1, x2 = x[..., :midpoint], x[..., midpoint:]
             return (x * cos) + (mx.concatenate([-x2, x1], axis = -1) * sin)
         B, L, _ = x.shape
@@ -557,11 +561,11 @@ class SuRoPE:
             position_ids = mx.concatenate([pids, extended_pids], axis=1)
         position_ids_expanded = position_ids[:, None, :]
         inv_freq = 1.0 / (mx.array(su_factor, dtype=mx.float32) * config.rope_theta**(mx.arange(0, dim, 2, dtype=mx.float32) / dim))
-        inv_freq_expanded = mx.repeat(inv_freq[None, :, None], position_ids.shape[0], axis=0)        
-        freqs = (inv_freq_expanded @ position_ids_expanded).transpose(0, 2, 1)  
-        emb = mx.concatenate([freqs, freqs], axis=-1)  
+        inv_freq_expanded = mx.repeat(inv_freq[None, :, None], position_ids.shape[0], axis=0)
+        freqs = (inv_freq_expanded @ position_ids_expanded).transpose(0, 2, 1)
+        emb = mx.concatenate([freqs, freqs], axis=-1)
         self.cos = mx.expand_dims(mx.cos(emb) * scaling_factor, axis=1)
-        self.sin = mx.expand_dims(mx.sin(emb) * scaling_factor, axis=1) 
+        self.sin = mx.expand_dims(mx.sin(emb) * scaling_factor, axis=1)
 
     def __call__(self, past_L, new_L):
         return self.cos[:,:,past_L:past_L+new_L,:], self.sin[:,:,past_L:past_L+new_L,:]
@@ -581,7 +585,7 @@ class KVCache:
             return keys, values
         B, N, L, D = keys.shape
         new_offset = self.offset + L
-        if self.use_quantized_cache: 
+        if self.use_quantized_cache:
             if self.kv is not None:
                 k_cache = mx.dequantize(*self.kv[0], group_size=32).reshape((B, N, -1, D))
                 v_cache = mx.dequantize(*self.kv[1], group_size=32).reshape((B, N, -1, D))
@@ -662,7 +666,7 @@ def _linear_to_lora_layers(model, lora_layers, config):
         lora_layers = [(k, to_lora(m)) for k, m in l.named_modules() if k == "self_attn.qkv_proj"]
         l.update_modules(tree_unflatten(lora_layers))
 
-def _load(model_path='phi3v', adapter_path=None, **kwargs):
+def _load(model_path=PATH_ORIGINAL_PHI3_V, adapter_path=None, **kwargs):
     model_cfg = _get_cfg(f"{model_path}/config.json", **kwargs)
     model = Phi3VLModel(model_cfg)
     nn.quantize(model, model_cfg.quantized['group_size'], model_cfg.quantized['bits']) if getattr(model_cfg, 'quantized', False) else None
@@ -675,7 +679,7 @@ def _load(model_path='phi3v', adapter_path=None, **kwargs):
     model.eval()
     return model, Phi3VProcessor(model_path)
 
-def _quantize(from_path='phi3v', to_path='quantized_phi3v', q_group_size=64, q_bits=4):
+def _quantize(from_path=PATH_ORIGINAL_PHI3_V, to_path=PATH_QUANTIZED_PHI3_V, q_group_size=64, q_bits=4):
     if not os.path.exists(from_path):
         snapshot_download(repo_id="microsoft/Phi-3-vision-128k-instruct", allow_patterns=["*.safetensors", "*.json"], local_dir=from_path)
     model_cfg = _get_cfg(f"{from_path}/config.json")
@@ -691,7 +695,7 @@ def _quantize(from_path='phi3v', to_path='quantized_phi3v', q_group_size=64, q_b
     with open(f"{to_path}/config.json", "w") as f:
         json.dump(vars(model_cfg)|{'quantized':quantization_config, 'sanitized':True}, f, indent=4)
     mx.save_safetensors(f'{to_path}/quantized_model.safetensors', quantized_weights)
-    
+
 def _load_image(image_source): # copied from https://github.com/Blaizzy/mlx-vlm/blob/main/mlx_vlm/utils.py
     if isinstance(image_source, BytesIO):
         try:
@@ -717,9 +721,16 @@ def _load_image(image_source): # copied from https://github.com/Blaizzy/mlx-vlm/
             f"The image {image_source} must be a valid URL or existing file."
         )
 
-def _get_api_output_path(process):
+def _get_api_output_path(process, file_prefix):
     if '<|api_output|>' in process.stdout:
-        return process.stdout.strip().split('<|api_output|>', 1)[1]
+        _api_output = process.stdout.strip().split('<|api_output|>', 1)[1]
+        _from_path = Path(_api_output)
+        if _from_path.is_file():
+            _to_path = f'{file_prefix}_{_from_path.name}'
+            _from_path.rename(_to_path)
+            return _to_path
+        else:
+            return _api_output
     else:
         return None
 
@@ -779,7 +790,7 @@ def _generate(model, processor, prompt, images=None, max_tokens=1000, verbose=Tr
             break
     result, gen_len = streamer.end()
     gen_time = tic()
-    prompt_len = dict_input['input_ids'].size 
+    prompt_len = dict_input['input_ids'].size
     prompt_tps = prompt_len / prompt_time
     gen_tps = (gen_len - 1) / gen_time
     if verbose:
@@ -788,9 +799,9 @@ def _generate(model, processor, prompt, images=None, max_tokens=1000, verbose=Tr
     if return_tps:
         return prompt_tps, gen_tps
     return result
-    
+
 def _execute(code_string, file_prefix=0):
-    code_string = '\n'.join(re.findall(r"```python\n(.*?)```", code_string, re.DOTALL))
+    code_string = '\n'.join(re.findall(r"```python\n(.*?)```", code_string, re.DOTALL)).strip()
     if len(code_string) < 1:
         return None, None, None, None
     code_string = re.sub(r'plt\.savefig\(.*?\)', 'plt.show()', code_string)
@@ -798,11 +809,12 @@ def _execute(code_string, file_prefix=0):
     code_to_run = code_string.replace("plt.show()", f"plt.savefig('{plot_path}')")
     process = subprocess.run(["python", "-c", code_to_run], capture_output=True, text=True)
     output_path = None
+    stdout = process.stdout.strip()
     stderr = process.stderr.strip()
     if len(stderr) < 1:
-        output_path = plot_path if plot_path else _get_api_output_path(process)
-        stderr = None    
-    return code_string.strip(), output_path, process.stdout.strip(), stderr
+        output_path = plot_path if plot_path else _get_api_output_path(process, file_prefix)
+        stderr = None
+    return code_string, output_path, stdout, stderr
 
 def load_text(file_path):
     file_path = file_path.strip()
@@ -870,7 +882,7 @@ def chatui(agent=None):
         bot_msg = chat_msg.then(bot, chatbot, chatbot, api_name="bot_response")
         bot_msg.then(lambda: gr.MultimodalTextbox(interactive=True), None, [chat_input])
 
-        close_btn.click(reset, None, chatbot) 
+        close_btn.click(reset, None, chatbot)
 
     demo.queue()
     demo.launch(inbrowser=True, inline=True)
@@ -913,7 +925,7 @@ def train_lora(lora_layers=5, lora_rank=16, epochs=10, lr=1e-4, warmup=.5, mask_
         loss_ce = loss_ce.mean(axis=-1)
         loss_ce = (loss_ce * loss_scale).sum()
         return loss_ce
-        
+
     def _set_lora(lora_layers, lora_rank, adapter_path):
         lora_cfg = {
             "adapter_path": adapter_path,
@@ -933,7 +945,7 @@ def train_lora(lora_layers=5, lora_rank=16, epochs=10, lr=1e-4, warmup=.5, mask_
     ds = datasets.concatenate_datasets([ds]*epochs)
     steps = len(ds)
     lora_cfg = _set_lora(lora_layers, lora_rank, adapter_path)
-    model.freeze()    
+    model.freeze()
     _linear_to_lora_layers(model, lora_cfg['lora_layers'], lora_cfg['lora_parameters'])
     model.train()
     distil_loss_value_and_grad = nn.value_and_grad(model, _loss)
@@ -976,14 +988,13 @@ def test_lora(dataset_path="JosefAlbers/akemiH_MedQA_Reason"):
     del model
     del processor
 
-
 def benchmark():
     prompts = [
         ('Write a cosmic horror.', ),
         ('What is shown in this image?', 'https://assets-c4akfrf5b4d3f4b7.z01.azurefd.net/assets/2024/04/BMDataViz_661fb89f3845e.png'),
         ([
             "Write an executive summary for a communications business plan",
-            "Write a resume.", 
+            "Write a resume.",
             "Write a mystery horror.",
             "Write a Neurology ICU Admission Note."
             ], None),
@@ -1015,17 +1026,17 @@ def add_code(prompt, codes):
     return prompt if codes is None else [f'{prompt}\n\n```python\n{code}\n```\n' for code in codes]
 
 def load(quantize_model=False, quantize_cache=False, adapter_path=None, **kwargs):
-    if not os.path.exists('phi3v'):
-        snapshot_download(repo_id="microsoft/Phi-3-vision-128k-instruct", allow_patterns=["*.safetensors", "*.json"], local_dir='phi3v')
+    if not os.path.exists(PATH_ORIGINAL_PHI3_V):
+        snapshot_download(repo_id="microsoft/Phi-3-vision-128k-instruct", allow_patterns=["*.safetensors", "*.json"], local_dir=PATH_ORIGINAL_PHI3_V)
         _quantize()
         train_lora(1,1,1)
-    model_path='quantized_phi3v' if quantize_model is True else 'phi3v'
+    model_path=PATH_QUANTIZED_PHI3_V if quantize_model is True else PATH_ORIGINAL_PHI3_V
     return _load(model_path=model_path, use_quantized_cache=quantize_cache, adapter_path=adapter_path)
 
 def get_api(prompt, n_topk=1, verbose=True):
     vdb = VDB()
-    codes = vdb(prompt)
     prompt = [prompt] if isinstance(prompt, str) else prompt
+    codes = vdb([p.split('<|api_input|>')[0] for p in prompt])
     codes = [code.format(prompt=prompt[i].split('<|api_input|>')[1]) for i, sublist in enumerate(codes) for code in sublist]
     print('Obtained api codes:\n', codes) if verbose is True else None
     return codes
@@ -1037,6 +1048,7 @@ def generate(prompt, images=None, preload=None, quantize_model=False, quantize_c
     return _generate(*preload, *_apply_chat_template(prompt, images, verbose, apply_chat_template), max_tokens=max_tokens, verbose=verbose, return_tps=return_tps, early_stop=early_stop, stream=stream)
 
 def execute(code_strings, file_prefix=0, verbose=True):
+    code_strings = [code_strings] if isinstance(code_strings, str) else code_strings
     results = [_execute(code_string, f'{file_prefix}_{i}') for i, code_string in enumerate(code_strings)]
     print('Execution results:', results) if verbose is True else None
     return {k: [r[i] for r in results] for i, k in enumerate(['codes', 'files', 'souts', 'serrs'])}
@@ -1047,13 +1059,13 @@ class Agent:
         responses = generate(prompt, images)
         files, codes = execute(responses, step)
         """
+
     def __init__(self, toolchain=None, enable_api=True, **kwargs):
-        toolchain = self._default_toolchain if toolchain is None else toolchain
-        self.set_toolchain(toolchain)
-        self.kwargs = kwargs|{'preload':load(**kwargs)}
+        self.kwargs = kwargs if 'preload' in kwargs else kwargs|{'preload':load(**kwargs)}
         self.enable_api = enable_api
+        self.set_toolchain(toolchain)
         self.reset()
-        
+
     def __call__(self, prompt:str, images=None):
         prompt = prompt.replace('"', '<|api_input|>') if self.enable_api else prompt
         self.ongoing.update({'prompt':prompt})
@@ -1079,7 +1091,7 @@ class Agent:
             json.dump(self.log, f, indent=4)
         self.ongoing = {k:None if v==[None] else v for k,v in self.ongoing.items()}
         self.ongoing['step']+=1
-    
+
     def end(self):
         self.ongoing.update({'END':'END'})
         self.log_step()
@@ -1090,7 +1102,7 @@ class Agent:
             s = s.strip().rstrip(')')
             out_part, fxn_part = s.split('=')
             fxn_name, args_part = fxn_part.split('(')
-            
+
             return {
                 'fxn': eval(fxn_name.strip()),
                 'args': [arg.strip() for arg in args_part.split(',')],
@@ -1102,5 +1114,48 @@ class Agent:
                 return ['responses', 'files']
             return [i.strip() for i in s.split('return ')[1].split(',')]
 
+        s = self._default_toolchain if s is None else s
         self.toolchain = [_parse_toolchain(i) for i in s.split('\n') if '=' in i]
         self.list_outs = _parse_return(s)
+
+def mistral_api(prompt, history):
+    history = '<s>' if history is None else history
+
+    history += f"[INST] {prompt} [/INST]"
+    client = InferenceClient("mistralai/Mistral-7B-Instruct-v0.3", token = os.environ.get('HF_READ_TOKEN', False))
+
+    generate_kwargs = dict(
+        temperature=0.9,
+        max_new_tokens=1024,
+        top_p=0.95,
+        repetition_penalty=1.0,
+        do_sample=True,
+        seed=42,
+        stream=False,
+        details=False,
+        # details=True,
+        return_full_text=False,
+    )
+    result = client.text_generation(history, **generate_kwargs)
+    result = result.strip()
+    # result = result.generated_text.strip() # if details=True
+    history += f" {result}</s> "
+    print(f'### Prompt ###\n{prompt}\n### Output ###\n{result}')
+    return {'responses':result, 'history':history}
+
+def bark_api(prompt):
+    client = InferenceClient("suno/bark-small", token = os.environ.get('HF_READ_TOKEN', False))
+    result = client.text_to_speech(prompt)
+    Path("hello_world.flac").write_bytes(result)
+    return prompt
+
+# mistral_toolchain = """
+# responses, history = mistral_api(prompt, history)
+# """
+
+# bark_toolchain = """
+# responses = bark_api(prompt)
+# """
+
+# agent = Agent()
+# agent('Write a neurology ICU admission note')

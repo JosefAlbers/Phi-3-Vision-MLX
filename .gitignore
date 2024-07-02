@@ -1,5 +1,4 @@
-phi3v/
-quantized_phi3v/
+models/
 adapters/
 *.egg-info
 *.json
