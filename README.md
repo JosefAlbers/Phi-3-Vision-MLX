@@ -1,50 +1,110 @@
-# Phi-3-Vision for Apple MLX
+# Phi-3-MLX: Language and Vision Models for Apple Silicon
 
-Phi-3-Vision for Apple MLX is a powerful and flexible AI agent framework that leverages the Phi-3-Vision model to perform a wide range of tasks, from visual question answering to code generation and execution. This project aims to provide an easy-to-use interface for interacting with the Phi-3-Vision model, while also offering advanced features like custom toolchains and model quantization.
+Phi-3-MLX is a versatile AI framework that leverages both the Phi-3-Vision multimodal model and the recently updated ([July 2, 2024](https://x.com/reach_vb/status/1808056108319179012)) Phi-3-Mini-128K language model, optimized for Apple Silicon using the MLX framework. This project provides an easy-to-use interface for a wide range of AI tasks, from advanced text generation to visual question answering and code execution.
 
-Phi-3-Vision is a state-of-the-art vision-language model that excels in understanding and generating content based on both textual and visual inputs. By integrating this model with Apple's MLX framework, we provide a high-performance solution optimized for Apple silicon.
+## Recent Updates: Phi-3 Mini Improvements
+
+Microsoft has recently released significant updates to the Phi-3 Mini model, dramatically improving its capabilities:
+
+- Substantially enhanced code understanding in Python, C++, Rust, and TypeScript
+- Improved post-training for better-structured output
+- Enhanced multi-turn instruction following
+- Added support for the `<|system|>` tag
+- Improved reasoning and long-context understanding
+
+## Features
+
+- Support for the newly updated Phi-3-Mini-128K (language-only) model
+- Integration with Phi-3-Vision (multimodal) model
+- Optimized performance on Apple Silicon using MLX
+- Batched generation for processing multiple prompts
+- Flexible agent system for various AI tasks
+- Custom toolchains for specialized workflows
+- Model quantization for improved efficiency
+- LoRA fine-tuning capabilities
+- API integration for extended functionality (e.g., image generation, text-to-speech)
 
 ## Quick Start
 
-**1. Install Phi-3 Vision MLX:**
-
-To install Phi-3-Vision-MLX, run the following command:
+Install and launch Phi-3-MLX from command line:
 
 ```bash
 pip install phi-3-vision-mlx
-```
-
-**2. Launch Phi-3 Vision MLX:**
-
-To launch Phi-3-Vision-MLX:
-
-```bash
 phi3v
 ```
 
-Or in a Python script:
+To instead use the library in a Python script:
+
+```python
+from phi_3_vision_mlx import generate
+```
+
+## Usage Examples
+
+### 1. Core Functionalities
+
+#### Visual Question Answering
+
+```python
+generate('What is shown in this image?', 'https://collectionapi.metmuseum.org/api/collection/v1/iiif/344291/725918/main-image')
+```
+
+#### Batch Generation
+
+```python
+prompts = [
+    "Explain the key concepts of quantum computing and provide a Rust code example demonstrating quantum superposition.",
+    "Write a poem about the first snowfall of the year.",
+    "Summarize the major events of the French Revolution.",
+    "Describe a bustling alien marketplace on a distant planet with unique goods and creatures."
+    "Implement a basic encryption algorithm in Python.",
+]
+
+# `Phi-3-Vision
+generate(prompts, max_tokens=100)
+# `Phi-3-Mini-128K
+generate(prompts, max_tokens=100, blind_model=True)
+```
+
+#### Model and Cache Quantization
+
+```python
+# `Model quantization
+generate("Explain the implications of quantum entanglement in quantum computing.", quantize_model=True)
+# `Cache quantization
+generate("Describe the potential applications of CRISPR gene editing in medicine.", quantize_cache=True)
+```
+
+#### LoRA Fine-tuning
+
+```python
+from phi_3_vision_mlx import train_lora
+
+train_lora(lora_layers=5, lora_rank=16, epochs=10, lr=1e-4, warmup=.5, mask_ratios=[.0], adapter_path='adapters', dataset_path = "JosefAlbers/akemiH_MedQA_Reason")
+```
+
+![Alt text](https://raw.githubusercontent.com/JosefAlbers/Phi-3-Vision-MLX/main/assets/train_log.png)
+
+```python
+generate("Write a cosmic horror.", adapter_path='adapters')
+```
+
+### 2. Agent Interactions
+
+#### Multi-turn Conversations and Context Handling
 
 ```python
 from phi_3_vision_mlx import Agent
 
 agent = Agent()
-```
-
-## Usage
-
-### **Visual Question Answering (VQA)**
-
-```python
-agent('What is shown in this image?', 'https://collectionapi.metmuseum.org/api/collection/v1/iiif/344291/725918/main-image')
-agent('What is the location?')
+agent('Analyze this image and describe the architectural style:', 'https://images.metmuseum.org/CRDImages/rl/original/DP-19531-075.jpg')
+agent('What historical period does this architecture likely belong to?')
 agent.end()
 ```
 
 ![Alt text](https://raw.githubusercontent.com/JosefAlbers/Phi-3-Vision-MLX/main/assets/vqa.png)
 
-### **Generative Feedback Loop**
-
-The agent can be used to generate code, execute it, and then modify it based on feedback:
+#### Generative Feedback Loop
 
 ```python
 agent('Plot a Lissajous Curve.')
@@ -54,9 +114,7 @@ agent.end()
 
 ![Alt text](https://raw.githubusercontent.com/JosefAlbers/Phi-3-Vision-MLX/main/assets/coding_agent.png)
 
-### **API Tool Use**
-
-You can use the agent to create images or generate speech using API calls:
+#### Extending Capabilities with API Integration
 
 ```python
 agent('Draw "A perfectly red apple, 32k HDR, studio lighting"')
@@ -67,13 +125,9 @@ agent.end()
 
 ![Alt text](https://raw.githubusercontent.com/JosefAlbers/Phi-3-Vision-MLX/main/assets/api_agent.png)
 
-### **Custom Toolchain**
+### 3. Toolchain Customization
 
-Toolchains allow you to customize the agent's behavior for specific tasks. Here are three examples:
-
-#### Example 1: In-Context Learning (ICL)
-
-You can create a custom toolchain to add context to the prompt:
+#### Example 1. In-Context Learning
 
 ```python
 from phi_3_vision_mlx import load_text
@@ -96,11 +150,7 @@ agent = Agent(toolchain, early_stop=100)
 agent('How to inspect API endpoints? @https://raw.githubusercontent.com/gradio-app/gradio/main/guides/08_gradio-clients-and-lite/01_getting-started-with-the-python-client.md')
 ```
 
-This toolchain adds context to the prompt from an external source, enhancing the agent's knowledge for specific queries.
-
-#### Example 2: Retrieval Augmented Generation (RAG)
-
-You can create another custom toolchain for retrieval-augmented generation (RAG) to code:
+#### Example 2. Retrieval Augmented Coding
 
 ```python
 from phi_3_vision_mlx import VDB
@@ -130,9 +180,7 @@ agent = Agent(toolchain_plot, False)
 _, images = agent(user_input)
 ```
 
-#### Example 3: Multi-Agent Interaction
-
-You can also have multiple agents interacting to complete a task:
+#### Example 3. Multi-Agent Interaction
 
 ```python
 # Continued from Example 2
@@ -140,52 +188,21 @@ agent_writer = Agent(early_stop=100)
 agent_writer(f'Write a stock analysis report on: {user_input}', images)
 ```
 
-### **Batch Generation**
-
-For efficient processing of multiple prompts:
-
-```python
-from phi_3_vision_mlx import generate
-
-generate([
-    "Write an executive summary for a communications business plan",
-    "Write a resume.", 
-    "Write a mystery horror.",
-    "Write a Neurology ICU Admission Note.",])
-```
-
-### **Model and Cache Quantization**
-
-Quantization can significantly reduce model size and improve inference speed:
-
-```python
-generate("Write a cosmic horror.", quantize_cache=True)
-generate("Write a cosmic horror.", quantize_model=True)
-```
-
-### **LoRA Training and Inference**
-
-Fine-tune the model for specific tasks:
-
-```python
-from phi_3_vision_mlx import train_lora
-
-train_lora(lora_layers=5, lora_rank=16, epochs=10, lr=1e-4, warmup=.5, mask_ratios=[.0], adapter_path='adapters', dataset_path = "JosefAlbers/akemiH_MedQA_Reason")
-```
-
-![Alt text](https://raw.githubusercontent.com/JosefAlbers/Phi-3-Vision-MLX/main/assets/train_log.png)
-
-```python
-generate("Write a cosmic horror.", adapter_path='adapters')
-```
-
 ## Benchmarks
 
-| Task                  | Vanilla Model | Quantized Model | Quantized Cache | LoRA        |
-|-----------------------|---------------|-----------------|-----------------|-------------|
-| Text Generation       |  8.72 tps     |  55.97 tps       |  7.04 tps      |  8.71 tps   |
-| Image Captioning      |  8.04 tps     |  32.48 tps       |  1.77 tps      |  8.00 tps   |
-| Batched Generation    | 30.74 tps     | 106.94 tps       | 20.47 tps      | 30.72 tps   |
+```python
+from phi_3_vision_mlx import benchmark
+
+benchmark()
+```
+
+| Task                  | Vanilla Model | Quantized Model | Quantized Cache | LoRA Adapter |
+|-----------------------|---------------|-----------------|-----------------|--------------|
+| Text Generation       |  8.72 tps     |  55.97 tps       |  7.04 tps      |  8.71 tps    |
+| Image Captioning      |  8.04 tps     |  32.48 tps       |  1.77 tps      |  8.00 tps    |
+| Batched Generation    | 30.74 tps     | 106.94 tps       | 20.47 tps      | 30.72 tps    |
+
+*(On an M1 Max 64GB)*
 
 ## License
 
