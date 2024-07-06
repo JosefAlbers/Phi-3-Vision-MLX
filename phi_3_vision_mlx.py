@@ -37,6 +37,8 @@ PATH_ORIGINAL_PHI3_VISION  = 'models/phi3_v'
 PATH_QUANTIZED_PHI3_VISION = 'models/phi3_v_Q'
 PATH_ORIGINAL_PHI3_BLIND   = 'models/phi3_mini_128k'
 PATH_QUANTIZED_PHI3_BLIND  = 'models/phi3_mini_128k_Q'
+ID_EOS = 32007
+ID_ASS = 32001
 
 class Tic:
     def __init__(self):
@@ -75,8 +77,7 @@ class Streamer:
             return [txt], len(self.list_tokens)
         else:
             arr_tokens = mx.concatenate(self.list_tokens, axis=1)
-            list_txt = [self.tokenizer.decode(i) for i in arr_tokens.tolist()]
-            list_txt = [i[:i.find(self.tokenizer.eos_token)+len(self.tokenizer.eos_token)] if self.tokenizer.eos_token in i else i for i in list_txt]
+            list_txt = [self.tokenizer.decode(i[:i.index(ID_EOS)+1] if ID_EOS in i else i) for i in arr_tokens.tolist()]
             for i, gen in enumerate(list_txt):
                 print(f'\n< Generated text for prompt #{i} >\n{gen}')
             return list_txt, arr_tokens.size
@@ -96,7 +97,7 @@ class LogitStopper:
             return False
         log_prob = nn.log_softmax(logits)
         log_prob_best = mx.max(log_prob[:,-1,:], axis=-1).item()
-        log_prob_eos = log_prob[:,-1,32007].item()
+        log_prob_eos = log_prob[:,-1,ID_EOS].item()
 
         if log_prob_eos > self.best_eos_sofar:
             self.log_prob_sum_since_last_best_eos = self.log_prob_sum - self.log_prob_sum_at_best_eos
@@ -112,7 +113,7 @@ class LogitStopper:
 class TokenStopper:
     def __init__(self, processor):
         self.tokenizer = processor.tokenizer
-        self.eos_id = 32007 # self.tokenizer.eos_token_id
+        self.eos_id = ID_EOS
         self.eos_rows = set()
     def __call__(self, token):
         if self.eos_id in token:
@@ -122,7 +123,8 @@ class TokenStopper:
         return False
 
 class TrainingCallback:
-    def __init__(self, lora_cfg, lr_schedule, sum_every=3):
+    def __init__(self, lora_cfg, lr_schedule, batch_indices, sum_every=3):
+        self.batch_indices = batch_indices
         self.lora_cfg = lora_cfg
         self.adapter_path = lora_cfg['adapter_path']
         self.lr_schedule = lr_schedule
@@ -132,11 +134,12 @@ class TrainingCallback:
         self.best_loss = math.inf
         self.train_log = {'step_i': [], 'step_loss': [], 'avg_i': [], 'avg_loss': []}
         self.start_time = time.perf_counter()
+        os.makedirs(self.adapter_path, exist_ok=True)
 
     def __call__(self, model, lvalue):
         self.current_step += 1
         step_loss = lvalue.item()
-        print(f'- Step loss at step {self.current_step}: {step_loss}')
+        print(f'- Step loss at step {self.current_step}: {step_loss:.2f}')
         self.train_log['step_i'].append(self.current_step)
         self.train_log['step_loss'].append(step_loss)
         self.sum_loss += step_loss
@@ -146,7 +149,7 @@ class TrainingCallback:
             self.sum_loss = 0.0
             self.train_log['avg_i'].append(self.current_step)
             self.train_log['avg_loss'].append(avg_loss)
-            print(f'Avg loss at step {self.current_step}: {avg_loss}')
+            print(f'Avg loss at step {self.current_step}: {avg_loss:.2f}')
             if avg_loss < self.best_loss:
                 self.best_loss = avg_loss
                 mx.save_safetensors(f'{self.adapter_path}/adapters.safetensors', dict(tree_flatten(model.trainable_parameters())))
@@ -158,7 +161,7 @@ class TrainingCallback:
             json.dump(self.lora_cfg, f, indent=4)
         with open(f'{self.adapter_path}/adapter_train_log.json', "w") as f:
             json.dump(train_log, f, indent=4)
-        fig, (ax1, ax2) = plt.subplots(2, 1)
+        fig, (ax1, ax2, ax3) = plt.subplots(3, 1)
         ax1.plot(train_log['step_i'], train_log['step_loss'], color='b', alpha=0.5, label='Step Loss')
         ax1.plot(train_log['avg_i'], train_log['avg_loss'], color='r', label='Avg Loss')
         ax1.set_title('Training Loss Curves')
@@ -166,8 +169,14 @@ class TrainingCallback:
         ax2.plot(self.lr_schedule)
         ax2.ticklabel_format(axis='y', style='sci')
         ax2.set_title('Learning Rate Schedule')
+        batch_indices = np.array(self.batch_indices)
+        batch_numbers = np.arange(len(batch_indices))
+        x = np.repeat(batch_numbers, [len(sublist) for sublist in batch_indices])
+        y = np.concatenate(batch_indices)
+        ax3.scatter(x,y, color='b', marker='.', alpha=0.5)
+        ax3.set_title('Batch Indices')
         plt.tight_layout()
-        fig.savefig(f'train_log.png')
+        fig.savefig(f'train_log_{self.current_step}_{train_log['train_time']:.0f}.png')
         print(f"Training log saved to {self.adapter_path}")
         print(f"Total training time: {train_log['train_time']:.2f} seconds")
 
@@ -315,31 +324,40 @@ class ClipVModel(nn.Module):
         self.vision_model = ClipModel(config)
 
 class Phi3FProcessor:
-    def __init__(self, local_dir):
+    def __init__(self, local_dir, return_mx=True):
         self.tokenizer = AutoTokenizer.from_pretrained(local_dir)
+        self.return_mx = return_mx
+
     def _tokenize(self, texts):
         if isinstance(texts, str):
             return {'input_ids': mx.array(self.tokenizer(texts).input_ids)[None]}
         input_ids = self.tokenizer(texts).input_ids
         max_length = max(len(sublist) for sublist in input_ids)
-        position_ids = mx.array([[1]*(max_length-len(sublist)) + list(range(len(sublist))) for sublist in input_ids])
-        attention_masks = mx.array([[0]*(max_length-len(sublist)) + [1]*len(sublist) for sublist in input_ids])
-        input_ids = mx.array([[0]*(max_length-len(sublist)) + sublist for sublist in input_ids])
+        position_ids =[[1]*(max_length-len(sublist)) + list(range(len(sublist))) for sublist in input_ids]
+        attention_masks = [[0]*(max_length-len(sublist)) + [1]*len(sublist) for sublist in input_ids]
+        input_ids = [[0]*(max_length-len(sublist)) + sublist for sublist in input_ids]
+        if self.return_mx:
+            input_ids = mx.array(input_ids)
+            position_ids = mx.array(position_ids)
+            attention_masks = mx.array(attention_masks)
         return {'input_ids':input_ids, 'pids':position_ids, 'mask':attention_masks}
-    def __call__(self, texts, images):
+
+    def __call__(self, texts, images=None):
         if images is not None:
             print(f'WARNING: You are using phi3_mini_128k. Use phi3_v for VLM tasks.')
         return self._tokenize(texts)
 
 class Phi3VProcessor(Phi3FProcessor):
-    def __init__(self, local_dir):
-        super().__init__(local_dir)
+    def __init__(self, local_dir, return_mx=True):
+        super().__init__(local_dir, return_mx)
         self.img_processor = Phi3VImageProcessor()
-    def __call__(self, texts, images):
+
+    def __call__(self, texts, images=None):
         if images is None:
             return self._tokenize(texts)
         image_inputs = self.img_processor(images)
         return self._merge(image_inputs, texts)
+
     def _merge(self, images, texts):
         pattern = r"<\|image_\d+\|>"
         prompt_chunks = self.tokenizer(re.split(pattern, texts)).input_ids
@@ -433,11 +451,9 @@ class Phi3VImageProcessor:
                 indices[i, 1] = right_indices[i]
                 weights[i, 0] = cubic(in_coordinates[i] - left_indices[i])
                 weights[i, 1] = cubic(right_indices[i] - in_coordinates[i])
-
                 weight_sum = weights[i].sum()
                 if weight_sum != 0:
                     weights[i] /= weight_sum
-
             return weights, indices
         N, C, H, W = input.shape
         out_hw = 336
@@ -451,7 +467,6 @@ class Phi3VImageProcessor:
                         h_kernel = input[n, c, h_indices[i]]
                         w_kernel = h_kernel[:, w_indices[j]]
                         output[n, c, i, j] = np.sum(h_weights[i][:, None] * w_weights[j] * w_kernel)
-
         return output
 
 class Phi3ImageEmbedding(nn.Module):
@@ -465,7 +480,6 @@ class Phi3ImageEmbedding(nn.Module):
         num_hidden_layers=24,
         patch_size=14,
         )
-
     def __init__(self, config):
         super().__init__()
         self.img_processor = ClipVModel(self.CLIP_VIT_LARGE_PATCH14_336_CONFIG)
@@ -513,6 +527,7 @@ class Phi3Attention(nn.Module):
         op_size = n_heads * head_dim + 2 * (n_kv_heads * head_dim)
         self.qkv_proj = nn.Linear(dim, op_size, bias=False)
         self.o_proj = nn.Linear(n_heads * head_dim, dim, bias=False)
+
     def __call__(self, x, cache, cos, sin, mask):
         @mx.compile
         def _rotate_half(x, cos, sin):
@@ -587,12 +602,13 @@ class KVCache:
         self.use_quantized_cache = getattr(config, "use_quantized_cache", False)
         self.offset = 0
         shape = (2, x.shape[0], config.num_key_value_heads, x.shape[1]+max_tokens, config.hidden_size // config.num_key_value_heads)
-        if self.use_quantized_cache:
+        if self.use_quantized_cache or max_tokens < 1:
             self.kv = None
         else:
             self.kv = mx.zeros(shape, mx.float32)
+
     def __call__(self, keys, values):
-        if self.max_tokens  < 1:
+        if self.max_tokens < 1:
             return keys, values
         B, N, L, D = keys.shape
         new_offset = self.offset + L
@@ -623,57 +639,24 @@ class Mask4D:
             mask_4d += mask
             mask_4d = mx.repeat(mask_4d, 32, axis=1)
         self.mask_4d = mask_4d
+
     def __call__(self, past_L, L):
         return self.mask_4d[:,:,past_L:L+past_L,:L+past_L]
 
-class Phi3Blind(nn.Module):
+class Phi3F(nn.Module):
     def __init__(self, config):
         super().__init__()
         self.embed_tokens = nn.Embedding(config.vocab_size, config.hidden_size)
+        self.vision_embed_tokens = None
         self.layers = [Phi3DecoderLayer(config) for _ in range(config.num_hidden_layers)]
         self.norm = nn.RMSNorm(config.hidden_size, eps=config.rms_norm_eps)
         self.use_quantized_cache= getattr(config, "use_quantized_cache", False)
         self.config = config
         self.num_hidden_layers = config.num_hidden_layers
+
     def __call__(self, input_ids, pixel_values, image_sizes, positions, cache, pids, mask, max_tokens):
         x = self.embed_tokens(input_ids)
-        if cache is None:
-            cache = [KVCache(self.config, x, max_tokens) for _ in range(self.num_hidden_layers)]
-            self.masker = Mask4D(x.shape[1]+max_tokens, mask)
-            self.roper = SuRoPE(self.config, x.shape[1]+max_tokens, pids)
-        past_L, new_L = cache[0].offset, x.shape[1]
-        mask = self.masker(past_L, new_L)
-        cos, sin = self.roper(past_L, new_L)
-        for i, l in enumerate(self.layers):
-            x = l(x, cache[i], cos, sin, mask)
-        return self.norm(x), cache
-
-class Phi3ForCausalLM(nn.Module):
-    def __init__(self, config):
-        super().__init__()
-        self.config = config
-        self.model = Phi3Blind(config)
-        self.lm_head = nn.Linear(config.hidden_size, config.vocab_size, bias=False)
-    def __call__(self, input_ids, pixel_values=None, image_sizes=None, positions=None, cache=None, pids=None, mask=None, max_tokens=0):
-        x, cache = self.model(input_ids, pixel_values, image_sizes, positions, cache, pids, mask, max_tokens)
-        return self.lm_head(x), cache
-    @property
-    def layers(self):
-        return self.model.layers
-
-class Phi3Vision(nn.Module):
-    def __init__(self, config):
-        super().__init__()
-        self.embed_tokens = nn.Embedding(config.vocab_size, config.hidden_size)
-        self.vision_embed_tokens = Phi3ImageEmbedding(config)
-        self.layers = [Phi3DecoderLayer(config) for _ in range(config.num_hidden_layers)]
-        self.norm = nn.RMSNorm(config.hidden_size, eps=config.rms_norm_eps)
-        self.use_quantized_cache= getattr(config, "use_quantized_cache", False)
-        self.config = config
-        self.num_hidden_layers = config.num_hidden_layers
-    def __call__(self, input_ids, pixel_values, image_sizes, positions, cache, pids, mask, max_tokens):
-        x = self.embed_tokens(input_ids)
-        if pixel_values is not None:
+        if pixel_values is not None and self.vision_embed_tokens:
             x = self.vision_embed_tokens(x, pixel_values, image_sizes, positions)
         if cache is None:
             cache = [KVCache(self.config, x, max_tokens) for _ in range(self.num_hidden_layers)]
@@ -686,18 +669,145 @@ class Phi3Vision(nn.Module):
             x = l(x, cache[i], cos, sin, mask)
         return self.norm(x), cache
 
-class Phi3VForCausalLM(nn.Module):
+class Phi3V(Phi3F):
+    def __init__(self, config):
+        super().__init__(config)
+        self.vision_embed_tokens = Phi3ImageEmbedding(config)
+
+class Phi3ForCausalLM(nn.Module):
     def __init__(self, config):
         super().__init__()
         self.config = config
-        self.model = Phi3Vision(config)
+        self.model = Phi3F(config)
         self.lm_head = nn.Linear(config.hidden_size, config.vocab_size, bias=False)
+
     def __call__(self, input_ids, pixel_values=None, image_sizes=None, positions=None, cache=None, pids=None, mask=None, max_tokens=0):
         x, cache = self.model(input_ids, pixel_values, image_sizes, positions, cache, pids, mask, max_tokens)
         return self.lm_head(x), cache
+
     @property
     def layers(self):
         return self.model.layers
+
+class Phi3VForCausalLM(Phi3ForCausalLM):
+    def __init__(self, config):
+        super().__init__(config)
+        self.model = Phi3V(config)
+
+class Agent:
+    """
+    A flexible agent class for managing toolchains and executing prompts.
+
+    The Agent class provides a framework for processing prompts through a series of tools
+    (functions) defined in a toolchain. It manages the execution flow, handles input and output,
+    and maintains a log of operations.
+
+    Attributes:
+    -----------
+    _default_toolchain : str
+        A string defining the default toolchain, which includes adding code to prompts,
+        generating responses, and executing code.
+
+    Methods:
+    --------
+    __init__(self, toolchain=None, enable_api=True, **kwargs)
+        Initialize the Agent with a toolchain and other optional parameters.
+
+    __call__(self, prompt:str, images=None)
+        Process a given prompt (and optionally images) through the toolchain.
+
+    reset()
+        Reset the agent's log and ongoing operations.
+
+    log_step()
+        Log the current step of operations.
+
+    end()
+        End the current session, log the final step, and reset the agent.
+
+    set_toolchain(s)
+        Set a new toolchain for the agent to use.
+
+    Usage:
+    ------
+    The Agent can be used to process prompts through a defined series of operations:
+    1. Initialize an Agent with a custom toolchain or use the default.
+    2. Call the Agent with a prompt (and optionally images) to process.
+    3. The Agent will execute each tool in the toolchain, passing results between steps.
+    4. Results are logged at each step and can be accessed or saved.
+
+    The toolchain is a string defining a series of operations, where each line is of the form:
+    'output1, output2, ... = function_name(input1, input2, ...)'
+
+    Example:
+    --------
+    >>> agent = Agent()
+    >>> result = agent("Tell me about this image", images=["path/to/image.jpg"])
+    >>> print(result['responses'])
+
+    Notes:
+    ------
+    - The Agent supports API input handling, which can be enabled/disabled during initialization.
+    - The toolchain can be customized to include different functions and processing steps.
+    - The Agent maintains a log of all operations, which can be useful for debugging or analysis.
+    - The 'enable_api' parameter affects how the Agent handles quotation marks in prompts.
+
+    """
+    _default_toolchain = """
+        prompt = add_code(prompt, codes)
+        responses = generate(prompt, images)
+        files, codes = execute(responses, step)
+        """
+    def __init__(self, toolchain=None, enable_api=True, **kwargs):
+        self.kwargs = kwargs if 'preload' in kwargs else kwargs|{'preload':load(**kwargs)}
+        self.enable_api = enable_api
+        self.set_toolchain(toolchain)
+        self.reset()
+    def __call__(self, prompt:str, images=None):
+        prompt = prompt.replace('"', '<|api_input|>') if self.enable_api else prompt
+        self.ongoing.update({'prompt':prompt})
+        if images is not None:
+            self.ongoing.update({'images':images})
+        for tool in self.toolchain:
+            _returned = tool['fxn'](*[self.ongoing.get(i, None) for i in tool['args']], **{k:v for k,v in self.kwargs.items() if k in inspect.signature(tool['fxn']).parameters.keys()})
+            if isinstance(_returned, dict):
+                self.ongoing.update({k:_returned[k] for k in tool['out']})
+            else:
+                self.ongoing.update({k:_returned for k in tool['out']})
+        self.log_step()
+        return {i:self.ongoing.get(i, None) for i in self.list_outs}
+    def reset(self):
+        self.log = []
+        self.ongoing = {'step':0}
+        self.user_since = 0
+    def log_step(self):
+        self.log.append({**self.ongoing})
+        with open(f'agent_log.json', "w") as f:
+            json.dump(self.log, f, indent=4)
+        self.ongoing = {k:None if v==[None] else v for k,v in self.ongoing.items()}
+        self.ongoing['step']+=1
+    def end(self):
+        self.ongoing.update({'END':'END'})
+        self.log_step()
+        self.reset()
+    def set_toolchain(self, s):
+        def _parse_toolchain(s):
+            s = s.strip().rstrip(')')
+            out_part, fxn_part = s.split('=')
+            fxn_name, args_part = fxn_part.split('(')
+
+            return {
+                'fxn': eval(fxn_name.strip()),
+                'args': [arg.strip() for arg in args_part.split(',')],
+                'out': [out.strip() for out in out_part.split(',')]
+            }
+        def _parse_return(s):
+            if 'return ' not in s:
+                return ['responses', 'files']
+            return [i.strip() for i in s.split('return ')[1].split(',')]
+        s = self._default_toolchain if s is None else s
+        self.toolchain = [_parse_toolchain(i) for i in s.split('\n') if '=' in i]
+        self.list_outs = _parse_return(s)
 
 def _linear_to_lora_layers(model, lora_layers, config):
     if isinstance(lora_layers, int):
@@ -722,18 +832,18 @@ def _setup():
         _quantize(from_path=local, to_path=quant)
         train_lora(model_path=local)
 
-def _load(model_path=PATH_ORIGINAL_PHI3_VISION, adapter_path=None, **kwargs):
+def _load(model_path=PATH_ORIGINAL_PHI3_VISION, adapter_path=None, return_mx=True, **kwargs):
     model_cfg = _get_cfg(f"{model_path}/config.json", **kwargs)
     model_arch = model_cfg.architectures[0]
     processor = eval(model_arch[:5]+'Processor')
-    processor = processor(model_path)
+    processor = processor(model_path, return_mx=return_mx)
     model = eval(model_arch)
     model = model(model_cfg)
     nn.quantize(model, model_cfg.quantized['group_size'], model_cfg.quantized['bits']) if getattr(model_cfg, 'quantized', False) else None
     model.load_weights(_get_wt(model_path, model_cfg))
     if adapter_path:
         lora_cfg = _get_cfg(f"{adapter_path}/adapter_config.json")
-        if lora_cfg.model_path == model_path:
+        if lora_cfg.model_path != model_path:
             print(f'WARNING: LoRA trained for {lora_cfg.model_path} is being used with {model_path}')
         _linear_to_lora_layers(model, lora_cfg.lora_layers, lora_cfg.lora_parameters)
         model.load_weights(f'{adapter_path}/adapters.safetensors', strict=False)
@@ -769,18 +879,14 @@ def _load_image(image_source): # copied from https://github.com/Blaizzy/mlx-vlm/
             response.raise_for_status()
             return Image.open(response.raw)
         except Exception as e:
-            raise ValueError(
-                f"Failed to load image from URL: {image_source} with error {e}"
-            )
+            raise ValueError(f"Failed to load image from URL: {image_source} with error {e}")
     elif Path(image_source).is_file():
         try:
             return Image.open(image_source)
         except IOError as e:
             raise ValueError(f"Failed to load image {image_source} with error: {e}")
     else:
-        raise ValueError(
-            f"The image {image_source} must be a valid URL or existing file."
-        )
+        raise ValueError(f"The image {image_source} must be a valid URL or existing file.")
 
 def _get_api_output_path(process, file_prefix):
     if '<|api_output|>' in process.stdout:
@@ -877,6 +983,24 @@ def _execute(code_string, file_prefix=0):
         stderr = None
     return code_string, output_path, stdout, stderr
 
+def _format_benchmark(json_path='benchmark.json'):
+    with open(json_path, "r") as f:
+        data = json.load(f)
+    tasks = ["Text Generation", "Image Captioning", "Batched Generation"]
+    task_indices = {0: "Text Generation", 1: "Image Captioning", 2: "Batched Generation"}
+    markdown_table = """
+    | Task                  | Vanilla Model | Quantized Model | Quantized Cache | LoRA Adapter |
+    |-----------------------|---------------|-----------------|-----------------|--------------|"""
+    def format_task_data(task_index):
+        vanilla_tps = data["vanilla"][task_index][2]
+        q_model_tps = data["q_model"][task_index][2]
+        q_cache_tps = data["q_cache"][task_index][2]
+        lora_tps = data["lora"][task_index][2]
+        return f"\n    | {task_indices[task_index]}{' '*(22-len(task_indices[task_index]))}|  {vanilla_tps:.2f} tps     |  {q_model_tps:.2f} tps      |  {q_cache_tps:.2f} tps       |  {lora_tps:.2f} tps    |"
+    for i in range(len(tasks)):
+        markdown_table += format_task_data(i)
+    print(markdown_table)
+
 def load_text(file_path):
     file_path = file_path.strip()
     parsed_url = urlparse(file_path)
@@ -894,7 +1018,122 @@ def load_text(file_path):
             return_text = file_path
     return return_text.replace('"', "'")
 
+def add_code(prompt, codes):
+    return prompt if codes is None else [f'{prompt}\n\n```python\n{code}\n```\n' for code in codes]
+
+def get_api(prompt, n_topk=1, verbose=True):
+    vdb = VDB()
+    prompt = [prompt] if isinstance(prompt, str) else prompt
+    codes = vdb([p.split('<|api_input|>')[0] for p in prompt])
+    codes = [code.format(prompt=prompt[i].split('<|api_input|>')[1]) for i, sublist in enumerate(codes) for code in sublist]
+    print('Obtained api codes:\n', codes) if verbose is True else None
+    return codes
+
+def mistral_api(prompt, history):
+    """
+    toolchain = "responses, history = mistral_api(prompt, history)"
+    agent = Agent(toolchain)
+    agent('Write a neurology ICU admission note')
+    """
+    history = '<s>' if history is None else history
+    history += f"[INST] {prompt} [/INST]"
+    client = InferenceClient("mistralai/Mistral-7B-Instruct-v0.3", token = os.environ.get('HF_READ_TOKEN', False))
+    generate_kwargs = dict(
+        temperature=0.9,
+        max_new_tokens=1024,
+        top_p=0.95,
+        repetition_penalty=1.0,
+        do_sample=True,
+        seed=42,
+        stream=False,
+        details=False,
+        # details=True,
+        return_full_text=False,
+    )
+    result = client.text_generation(history, **generate_kwargs)
+    result = result.strip()
+    # result = result.generated_text.strip() # if details=True
+    history += f" {result}</s> "
+    print(f'### Prompt ###\n{prompt}\n### Output ###\n{result}')
+    return {'responses':result, 'history':history}
+
+def bark_api(prompt):
+    """
+    toolchain = "responses = bark_api(prompt)"
+    agent = Agent(toolchain)
+    agent('Write a neurology ICU admission note')
+    """
+    client = InferenceClient("suno/bark-small", token = os.environ.get('HF_READ_TOKEN', False))
+    result = client.text_to_speech(prompt)
+    Path("bark.flac").write_bytes(result)
+    return prompt
+
 def chatui(agent=None):
+    """
+    Create and launch a chat user interface using Gradio.
+
+    This function sets up an interactive chat interface that allows users to communicate with an AI agent.
+    It supports text input and file uploads (specifically images) and displays the conversation history.
+
+    This function is also the entry point for the 'phi3v' command-line tool, which can be run directly
+    from the terminal after installing the phi-3-vision-mlx package.
+
+    Parameters:
+    -----------
+    agent : Agent, optional
+        An instance of the Agent class to handle the chat logic. If None, a new Agent instance is created.
+        Default is None.
+
+    Returns:
+    --------
+    None
+        The function launches a Gradio interface and doesn't return a value.
+
+    Behavior:
+    ---------
+    1. Initializes the chat agent if not provided.
+    2. Defines helper functions for message handling and bot responses:
+       - add_message: Adds user messages (text and files) to the chat history.
+       - bot: Processes user input through the agent and formats the response.
+       - reset: Resets the conversation and clears the chat history.
+    3. Creates a Gradio Blocks interface with the following components:
+       - Chatbot: Displays the conversation history.
+       - MultimodalTextbox: Allows text input and file uploads.
+       - Reset button: Clears the conversation.
+    4. Sets up event handlers for user input submission and bot responses.
+    5. Launches the Gradio interface in the browser.
+
+    Notes:
+    ------
+    - The interface supports both text and image inputs.
+    - Bot responses are processed to remove '<|end|>' tokens and empty lines.
+    - The chat history keeps track of user inputs and bot responses, including file uploads.
+    - The interface is set to occupy 80% of the viewport height.
+    - The Gradio footer is hidden using custom CSS.
+    - The interface is launched in-browser and inline.
+
+    Dependencies:
+    -------------
+    - Requires the Gradio library for creating the user interface.
+    - Assumes the existence of an Agent class that handles the chat logic.
+
+    Command-line Usage:
+    -------------------
+    After installing the phi-3-vision-mlx package, you can run this function directly from the terminal using:
+
+    $ phi3v
+
+    This will launch the chat interface in your default web browser.
+
+    Example:
+    --------
+    >>> chatui()
+    # This will launch the chat interface in the default web browser.
+
+    >>> custom_agent = Agent(custom_params)
+    >>> chatui(agent=custom_agent)
+    # Launches the chat interface with a custom agent configuration.
+    """
     agent = Agent() if agent is None else agent
     def add_message(history, message):
         for x in message["files"]:
@@ -948,43 +1187,115 @@ def chatui(agent=None):
     demo.queue()
     demo.launch(inbrowser=True, inline=True)
 
-def train_lora(model_path=PATH_ORIGINAL_PHI3_VISION, adapter_path=None, lora_layers=1, lora_rank=1, epochs=1, lr=1e-4, warmup=.5, mask_ratios=[.0], dataset_path="JosefAlbers/akemiH_MedQA_Reason"): # or mask_ratios=[.0, .1, .3, .5]
+def train_lora(model_path=PATH_QUANTIZED_PHI3_BLIND, adapter_path=None, lora_layers=1, lora_rank=1, epochs=1, batch_size=1, take=10, lr=1e-4, warmup=.5, mask_ratios=None, dataset_path="JosefAlbers/akemiH_MedQA_Reason"): # or mask_ratios=[.0, .1, .3, .5]
+    """
+    Train a LoRA (Low-Rank Adaptation) model using the specified parameters.
+
+    This function loads a pre-trained model, applies LoRA adaptations, and fine-tunes it on a given dataset.
+    It supports various training configurations, including masking strategies and learning rate scheduling.
+
+    Parameters:
+    -----------
+    model_path : str, optional
+        Path to the base model. Defaults to PATH_QUANTIZED_PHI3_BLIND.
+    adapter_path : str or None, optional
+        Path to save the LoRA adapter. If None, it's set to '{PATH_ADAPTERS}/{model_path}'.
+        Defaults to None.
+    lora_layers : int, optional
+        Number of layers to apply LoRA. Defaults to 1.
+    lora_rank : int, optional
+        Rank of the LoRA adapter. Defaults to 1.
+    epochs : int, optional
+        Number of training epochs. Defaults to 1.
+    batch_size : int, optional
+        Batch size for training. Defaults to 1.
+    take : int, optional
+        Number of samples to take from the dataset. Defaults to 10.
+    lr : float, optional
+        Learning rate for the optimizer. Defaults to 1e-4.
+    warmup : float, optional
+        Fraction of total steps to use for learning rate warmup. Defaults to 0.5.
+    mask_ratios : list of float or None, optional
+        Ratios for input masking. If None, no masking is applied. Defaults to None.
+    dataset_path : str, optional
+        Path to the dataset used for training. Defaults to "JosefAlbers/akemiH_MedQA_Reason".
+
+    Returns:
+    --------
+    None
+        The function doesn't return a value but saves the trained LoRA adapter to the specified path.
+
+    Notes:
+    ------
+    - The function uses several helper methods for data processing, loss calculation, and training.
+    - It applies a learning rate schedule with warmup.
+    - If mask_ratios are provided, it applies input masking during training.
+    - The function uses AdamW optimizer for training.
+    - After training, it cleans up by deleting the model and processor to free memory.
+
+    Example:
+    --------
+    >>> train_lora(lora_layers=5, lora_rank=16, epochs=10,
+    ...            take=10, batch_size=2, lr=1e-4, warmup=.5,
+    ...            dataset_path="JosefAlbers/akemiH_MedQA_Reason")
+    """
     def _prompt(example):
-        _question = example['input'].rsplit(' A: ', 1)[0].strip()
-        _summary = example['summary'].strip().split('\n', 1)[0].strip()
-        _prompt = f"<|user|>\n{_question}<|end|>\n<|assistant|>\n{_summary}<|end|>"
-        _tokens = processor.tokenizer.encode(_prompt)
-        _idx = _tokens.index(32001)
-        example['input_tokens'] = _tokens
-        example['idx_assistant'] = _idx
+        questions = [i.rsplit(' A: ', 1)[0].strip() for i in example['input']]
+        summaries = [i.strip().split('\n', 1)[0].strip() for i in example['summary']]
+        prompts = [f"<|user|>\n{q}<|end|>\n<|assistant|>\n{s}<|end|>" for q,s in zip(questions, summaries)]
+        example['prompts'] = prompts
         return example
 
-    def _mask(input_tokens, idx_assistant, mask_ratios):
-        mask_range = range(max((i for i, num in enumerate(input_tokens) if num < 0), default=0)+3, idx_assistant-3)
-        list_masks = []
-        for ratio in mask_ratios:
-            if ratio > 0:
-                list_masks.append( [ 0 if i in random.sample(mask_range, int(len(mask_range)*ratio)) else 1 for i in range(len(input_tokens)) ] )
-            else:
-                list_masks.append([1]*len(input_tokens))
-        list_tokens = [input_tokens]*len(mask_ratios)
-        loss_scale = [10.**(-10*i) for i in mask_ratios]
-        return mx.array(list_tokens), mx.array(list_masks), mx.array(loss_scale)
+    def _mask(batch):
+        if mask_ratios is None:
+            return batch, mx.ones(len(batch['input_ids']))
+        new_batch = {key: [] for key in batch}
+        num_sequences = len(batch['input_ids'])
+        num_versions = len(mask_ratios) + 1
+        loss_scales = []
+        for key in batch:
+            if key != 'mask':
+                new_batch[key] = [seq for seq in batch[key] for _ in range(num_versions)]
+        for i in range(num_sequences):
+            input_tokens = batch['input_ids'][i]
+            original_mask = batch['mask'][i]
+            new_batch['mask'].append(original_mask)
+            loss_scales.append(1.0)
+            start = max((j for j, num in enumerate(input_tokens) if num < 0), default=0) + 3
+            end = input_tokens.index(ID_ASS) - 3 if ID_ASS in input_tokens else len(input_tokens)
+            maskable_range = range(start, end)
+            maskable_indices = [j for j in maskable_range if original_mask[j] == 1]
+            for ratio in mask_ratios:
+                masked_attention_mask = original_mask.copy()
+                num_to_mask = int(len(maskable_indices) * ratio)
+                mask_indices = random.sample(maskable_indices, num_to_mask)
+                for idx in mask_indices:
+                    masked_attention_mask[idx] = 0
+                new_batch['mask'].append(masked_attention_mask)
+                loss_scales.append(10.**(-10.*ratio))
+        return new_batch, mx.array(loss_scales)
 
     def _get_batch(i):
-        idx_assistant = ds[i]['idx_assistant']
-        list_tokens = ds[i]['input_tokens']
-        input_tokens, input_mask, loss_scale = _mask(list_tokens, idx_assistant, mask_ratios)
-        ground_truth = input_tokens[:, idx_assistant+1:]
-        return input_tokens, ground_truth, idx_assistant, input_mask, loss_scale
+        batch = ds[i]
+        batch = processor(batch['prompts'])
+        batch, loss_scales = _mask(batch)
+        splits = [i.index(ID_ASS) for i in batch['input_ids']]
+        start_ce = min(splits)
+        targets = mx.array(batch['input_ids'])[:,1:]
+        loss_masks = mx.arange(targets.shape[1])[None,:] >= mx.array(splits)[:, None]
+        inputs = {k:mx.array(v) for k,v in batch.items() if k in ['input_ids', 'pids', 'mask']}
+        targets = targets[:, start_ce:]
+        loss_masks = loss_masks[:, start_ce:]
+        return inputs, targets, loss_masks, start_ce, loss_scales
 
     def _loss(model, batch):
-        input_tokens, ground_truth, idx_assistant, input_mask, loss_scale = batch
-        logit_output, _ = model(input_tokens, mask = input_mask)
-        logit_output = logit_output[:, idx_assistant:-1, :].astype(mx.float32)
-        loss_ce = nn.losses.cross_entropy(logit_output, ground_truth, reduction='none')
-        loss_ce = loss_ce.mean(axis=-1)
-        loss_ce = (loss_ce * loss_scale).sum()
+        inputs, targets, loss_masks, start_ce, loss_scales = batch
+        logit_outputs, _ = model(**inputs)
+        logit_outputs = logit_outputs[:,:-1].astype(mx.float32)
+        logit_outputs = logit_outputs[:,start_ce:]
+        loss_ce = nn.losses.cross_entropy(logit_outputs, targets, reduction='none') * loss_masks
+        loss_ce = loss_ce.sum(axis=1) / loss_masks.sum(axis = 1)
+        loss_ce = (loss_ce * loss_scales).sum() # / targets.shape[0]
         return loss_ce
 
     def _set_lora(model_path, adapter_path, lora_layers, lora_rank):
@@ -994,7 +1305,6 @@ def train_lora(model_path=PATH_ORIGINAL_PHI3_VISION, adapter_path=None, lora_lay
             "lora_layers": lora_layers,
             "lora_parameters": {"rank": lora_rank, "alpha": lora_rank, "dropout": 0.0, "scale": 1.0},
         }
-        os.makedirs(adapter_path, exist_ok=True)
         return lora_cfg
 
     def _get_lr_schedule(lr, steps, warmup):
@@ -1004,22 +1314,23 @@ def train_lora(model_path=PATH_ORIGINAL_PHI3_VISION, adapter_path=None, lora_lay
     if adapter_path is None:
         adapter_path = f'{PATH_ADAPTERS}/{model_path}'
 
-    model, processor = _load(model_path)
-    ds = datasets.load_dataset(dataset_path, split='train').take(10) # `debug
-    ds = ds.map(_prompt).select_columns(['input_tokens', 'idx_assistant'])
-    ds = datasets.concatenate_datasets([ds]*epochs)
-    steps = len(ds)
+    model, processor = _load(model_path, return_mx=False)
+    ds = datasets.load_dataset(dataset_path, split='train').take(take)
+    ds = ds.map(_prompt, batched=True).select_columns(['prompts'])
+    batch_idx = []
+    for _ in range(epochs):
+        batch_idx +=  [x[i:i+batch_size] for x in [random.sample(range(len(ds)), len(ds))] for i in range(0, len(x) - batch_size + 1, batch_size)]
     lora_cfg = _set_lora(model_path, adapter_path, lora_layers, lora_rank)
     model.freeze()
     _linear_to_lora_layers(model, lora_cfg['lora_layers'], lora_cfg['lora_parameters'])
     model.train()
     distil_loss_value_and_grad = nn.value_and_grad(model, _loss)
-    lr_schedule = _get_lr_schedule(lr, steps, warmup)
-    callback = TrainingCallback(lora_cfg, lr_schedule)
+    lr_schedule = _get_lr_schedule(lr, len(batch_idx), warmup)
+    callback = TrainingCallback(lora_cfg, lr_schedule, batch_idx)
     optimizer=optim.AdamW(learning_rate=lr_schedule[0])
     state = [model.state, optimizer.state]
-    for i in range(steps):
-        batch_i = _get_batch(i)
+    for i, idx in enumerate(batch_idx):
+        batch_i = _get_batch(idx)
         lvalue, grad = distil_loss_value_and_grad(model, batch_i)
         optimizer.learning_rate = lr_schedule[i]
         optimizer.update(model, grad)
@@ -1029,52 +1340,134 @@ def train_lora(model_path=PATH_ORIGINAL_PHI3_VISION, adapter_path=None, lora_lay
     del model
     del processor
 
-def test_lora(model_path=PATH_ORIGINAL_PHI3_VISION, adapter_path=None, dataset_path="JosefAlbers/akemiH_MedQA_Reason"):
-    if adapter_path is None:
-        adapter_path = f'{PATH_ADAPTERS}/{model_path}'
+def test_lora(model_path=PATH_QUANTIZED_PHI3_BLIND, adapter_path=True, dataset_path="JosefAlbers/akemiH_MedQA_Reason", take=10):
+    """
+    Test a LoRA (Low-Rank Adaptation) model on a given dataset.
 
-    model, processor = _load(model_path=model_path, adapter_path=adapter_path)
-    def _get_alphabet(text):
-        try:
-            return "".join([char for char in text if char.isalpha()]).upper()[0]
-        except:
-            return ""
-    def _recall(example):
-        question = example['input']
-        _question = question.rsplit(' A: ', 1)[0].strip()
-        prompt_recall = f"<|user|>\n{_question}<|end|>\n<|assistant|>"
-        example['recall'] = _generate(model, processor, prompt_recall, max_tokens=30, verbose=False)[0]
-        prompt_answer = f"<|user|>\n{question}<|end|>\n<|assistant|>\nThe correct answer is"
-        example['attempt'] = _get_alphabet(_generate(model, processor, prompt_answer, max_tokens=3, verbose=False)[0])
-        _summary = example['summary'].strip().split('\n', 1)[0].strip()
-        example['result'] = f"Question: {_question}\n- Taught: {_summary}\n- Recall: {example['recall']}\n- Answer: {example['output']}\n- Attempt: {example['attempt']}\n- Correct: {example['output'] == example['attempt']}"
+    This function loads a model and its LoRA adapter, processes a dataset, and evaluates the model's
+    performance on recall and answer generation tasks.
+
+    Parameters:
+    -----------
+    model_path : str, optional
+        Path to the base model. Defaults to PATH_QUANTIZED_PHI3_BLIND.
+    adapter_path : bool or str, optional
+        Path to the LoRA adapter. If True, it's set to '{PATH_ADAPTERS}/{model_path}'.
+        If None, the model without adapter is tested. Defaults to True.
+    dataset_path : str, optional
+        Path to the dataset to be used for testing. Defaults to "JosefAlbers/akemiH_MedQA_Reason".
+    take : int, optional
+        Number of samples to take from the dataset. Defaults to 10.
+
+    Returns:
+    --------
+    None
+        The function prints the evaluation results and doesn't return any value.
+
+    Notes:
+    ------
+    - The function uses two internal functions: _try for generating responses and evaluating them.
+    - It performs two tasks: recall (summarization) and answer generation.
+    - The function prints comparison between generated and true responses, and a final score.
+    - After completion, it deletes the model and processor to free up memory.
+
+    Example:
+    --------
+    >>> test_lora(model_path="path/to/model", adapter_path="path/to/adapter", dataset_path="dataset/path", take=20)
+    """
+    def _try(example, q_col, q_until, q_format, max_tokens, a_col, c_col=None, verbose=True):
+        questions = example[q_col]
+        if q_until is not None:
+            questions = [i.rsplit(q_until, 1)[0].strip() for i in questions]
+        prompts_answer = [f"<|user|>\n{i}<|end|>\n<|assistant|>{q_format}" for i in questions]
+        attempts = _generate(model, processor, prompts_answer, max_tokens=max_tokens+2, verbose=False)
+        example[a_col] = [i.strip() for i in attempts]
+        if c_col is not None and verbose is True:
+            print('### Compare ###')
+            for i,j in zip(example[a_col], example[c_col]):
+                print('LoRA:', i)
+                print('True: ', j.strip().split('\n', 1)[0])
+                print('---')
         return example
-    ds = datasets.load_dataset(dataset_path, split='train').take(10)
-    ds = ds.map(_recall)
-    num_recall = len(ds.filter(lambda x: x["output"] == x["attempt"]))
-    print('\n'.join(ds['result']), f'\n---\nFinal Score: {num_recall/len(ds)}({num_recall}/{len(ds)})')
+
+    if adapter_path is True:
+        adapter_path = f'{PATH_ADAPTERS}/{model_path}'
+    model, processor = _load(model_path=model_path, adapter_path=adapter_path)
+    ds = datasets.load_dataset(dataset_path, split='train').take(take)
+    _recall_args = {
+        'q_col':'input',
+        'q_until':' A: ',
+        'q_format':'',
+        'max_tokens':30,
+        'a_col':'recall',
+        'c_col':'summary',
+        'verbose':True
+    }
+    ds = ds.map(_try, batched=True, fn_kwargs=_recall_args)
+    _answer_args = {
+        'q_col':'input',
+        'q_until':None,
+        'q_format':'\nThe correct answer is',
+        'max_tokens':1,
+        'a_col':'attempt',
+        'c_col':'output',
+        'verbose':False,
+    }
+    ds = ds.map(_try, batched=True, fn_kwargs=_answer_args)
+    num_recall = len(ds.filter(lambda x: x["output"] == x["attempt"][0]))
+    print(f'Score: {num_recall/len(ds)}({num_recall}/{len(ds)})')
     del model
     del processor
 
-def _format_benchmark(json_path='benchmark.json'):
-    with open(json_path, "r") as f:
-        data = json.load(f)
-    tasks = ["Text Generation", "Image Captioning", "Batched Generation"]
-    task_indices = {0: "Text Generation", 1: "Image Captioning", 2: "Batched Generation"}
-    markdown_table = """
-    | Task                  | Vanilla Model | Quantized Model | Quantized Cache | LoRA Adapter |
-    |-----------------------|---------------|-----------------|-----------------|--------------|"""
-    def format_task_data(task_index):
-        vanilla_tps = data["vanilla"][task_index][2]
-        q_model_tps = data["q_model"][task_index][2]
-        q_cache_tps = data["q_cache"][task_index][2]
-        lora_tps = data["lora"][task_index][2]
-        return f"\n    | {task_indices[task_index]}{' '*(22-len(task_indices[task_index]))}|  {vanilla_tps:.2f} tps     |  {q_model_tps:.2f} tps      |  {q_cache_tps:.2f} tps       |  {lora_tps:.2f} tps    |"
-    for i in range(len(tasks)):
-        markdown_table += format_task_data(i)
-    print(markdown_table)
-
 def benchmark(blind_model=False):
+    """
+    Perform a benchmark test on different model configurations and save the results.
+
+    This function tests various configurations of a language model (vanilla, quantized model,
+    quantized cache, and LoRA) on a set of predefined prompts. It measures the performance
+    in terms of tokens per second (TPS) for both prompt processing and text generation.
+
+    Parameters:
+    -----------
+    blind_model : bool, optional
+        If True, uses a 'blind' version of the model (details depend on implementation).
+        Defaults to False.
+
+    Returns:
+    --------
+    None
+        The function doesn't return a value but saves the benchmark results to a JSON file
+        and prints a formatted version of the results.
+
+    Behavior:
+    ---------
+    1. Defines a set of test prompts, including text-only and image-text prompts.
+    2. Tests four configurations: vanilla, quantized model, quantized cache, and LoRA.
+    3. For each configuration:
+       - Loads the model with appropriate settings.
+       - Processes each prompt and generates text.
+       - Measures TPS for prompt processing and text generation.
+    4. Saves all results to 'benchmark.json'.
+    5. Calls a function to format and print the benchmark results.
+
+    Notes:
+    ------
+    - The function uses predefined prompts, including a mix of text-only and image-text tasks.
+    - It generates 100 tokens for each prompt.
+    - The results are stored in a dictionary with keys 'vanilla', 'q_model', 'q_cache', 'lora'.
+    - Each result entry contains the prompt index, prompt TPS, and generation TPS.
+    - The function cleans up resources by deleting the model after each configuration test.
+    - Requires 'generate', 'load', and '_format_benchmark' functions to be defined elsewhere.
+
+    Example:
+    --------
+    >>> benchmark()
+    # This will run the benchmark and save results to 'benchmark.json',
+    # then print a formatted version of the results.
+
+    >>> benchmark(blind_model=True)
+    # Runs the benchmark using the 'blind' version of the model.
+    """
     prompts = [
         ('Write a mystery horror.', ),
         ('What is shown in this image?', 'https://assets-c4akfrf5b4d3f4b7.z01.azurefd.net/assets/2024/04/BMDataViz_661fb89f3845e.png'),
@@ -1120,9 +1513,6 @@ def benchmark(blind_model=False):
         json.dump(results, f, indent=4)
     _format_benchmark()
 
-def add_code(prompt, codes):
-    return prompt if codes is None else [f'{prompt}\n\n```python\n{code}\n```\n' for code in codes]
-
 def load(blind_model=False, quantize_model=False, quantize_cache=False, use_adapter=False, **kwargs):
     if blind_model:
         if quantize_model:
@@ -1142,14 +1532,6 @@ def load(blind_model=False, quantize_model=False, quantize_cache=False, use_adap
         _setup()
     return _load(model_path=model_path, use_quantized_cache=quantize_cache, adapter_path=adapter_path)
 
-def get_api(prompt, n_topk=1, verbose=True):
-    vdb = VDB()
-    prompt = [prompt] if isinstance(prompt, str) else prompt
-    codes = vdb([p.split('<|api_input|>')[0] for p in prompt])
-    codes = [code.format(prompt=prompt[i].split('<|api_input|>')[1]) for i, sublist in enumerate(codes) for code in sublist]
-    print('Obtained api codes:\n', codes) if verbose is True else None
-    return codes
-
 def generate(prompt, images=None, preload=None, blind_model=False, quantize_model=False, quantize_cache=False, use_adapter=False, max_tokens=1000, verbose=True, return_tps=False, early_stop=False, stream=True, apply_chat_template=True):
     if '<|api_input|>' in prompt:
         return get_api(prompt)
@@ -1162,118 +1544,3 @@ def execute(code_strings, file_prefix=0, verbose=True):
     results = [_execute(code_string, f'{file_prefix}_{i}') for i, code_string in enumerate(code_strings)]
     print('Execution results:', results) if verbose is True else None
     return {k: [r[i] for r in results] for i, k in enumerate(['codes', 'files', 'souts', 'serrs'])}
-
-class Agent:
-    _default_toolchain = """
-        prompt = add_code(prompt, codes)
-        responses = generate(prompt, images)
-        files, codes = execute(responses, step)
-        """
-    def __init__(self, toolchain=None, enable_api=True, **kwargs):
-        self.kwargs = kwargs if 'preload' in kwargs else kwargs|{'preload':load(**kwargs)}
-        self.enable_api = enable_api
-        self.set_toolchain(toolchain)
-        self.reset()
-    def __call__(self, prompt:str, images=None):
-        prompt = prompt.replace('"', '<|api_input|>') if self.enable_api else prompt
-        self.ongoing.update({'prompt':prompt})
-        if images is not None:
-            self.ongoing.update({'images':images})
-        for tool in self.toolchain:
-            _returned = tool['fxn'](*[self.ongoing.get(i, None) for i in tool['args']], **{k:v for k,v in self.kwargs.items() if k in inspect.signature(tool['fxn']).parameters.keys()})
-            if isinstance(_returned, dict):
-                self.ongoing.update({k:_returned[k] for k in tool['out']})
-            else:
-                self.ongoing.update({k:_returned for k in tool['out']})
-        self.log_step()
-        return {i:self.ongoing.get(i, None) for i in self.list_outs}
-    def reset(self):
-        self.log = []
-        self.ongoing = {'step':0}
-        self.user_since = 0
-    def log_step(self):
-        self.log.append({**self.ongoing})
-        with open(f'agent_log.json', "w") as f:
-            json.dump(self.log, f, indent=4)
-        self.ongoing = {k:None if v==[None] else v for k,v in self.ongoing.items()}
-        self.ongoing['step']+=1
-    def end(self):
-        self.ongoing.update({'END':'END'})
-        self.log_step()
-        self.reset()
-    def set_toolchain(self, s):
-        def _parse_toolchain(s):
-            s = s.strip().rstrip(')')
-            out_part, fxn_part = s.split('=')
-            fxn_name, args_part = fxn_part.split('(')
-
-            return {
-                'fxn': eval(fxn_name.strip()),
-                'args': [arg.strip() for arg in args_part.split(',')],
-                'out': [out.strip() for out in out_part.split(',')]
-            }
-        def _parse_return(s):
-            if 'return ' not in s:
-                return ['responses', 'files']
-            return [i.strip() for i in s.split('return ')[1].split(',')]
-        s = self._default_toolchain if s is None else s
-        self.toolchain = [_parse_toolchain(i) for i in s.split('\n') if '=' in i]
-        self.list_outs = _parse_return(s)
-
-def mistral_api(prompt, history):
-    history = '<s>' if history is None else history
-    history += f"[INST] {prompt} [/INST]"
-    client = InferenceClient("mistralai/Mistral-7B-Instruct-v0.3", token = os.environ.get('HF_READ_TOKEN', False))
-    generate_kwargs = dict(
-        temperature=0.9,
-        max_new_tokens=1024,
-        top_p=0.95,
-        repetition_penalty=1.0,
-        do_sample=True,
-        seed=42,
-        stream=False,
-        details=False,
-        # details=True,
-        return_full_text=False,
-    )
-    result = client.text_generation(history, **generate_kwargs)
-    result = result.strip()
-    # result = result.generated_text.strip() # if details=True
-    history += f" {result}</s> "
-    print(f'### Prompt ###\n{prompt}\n### Output ###\n{result}')
-    return {'responses':result, 'history':history}
-
-def bark_api(prompt):
-    client = InferenceClient("suno/bark-small", token = os.environ.get('HF_READ_TOKEN', False))
-    result = client.text_to_speech(prompt)
-    Path("bark.flac").write_bytes(result)
-    return prompt
-
-# toolchain = "responses, history = mistral_api(prompt, history)"
-# toolchain = "responses = bark_api(prompt)"
-# agent = Agent(toolchain)
-# agent('Write a neurology ICU admission note')
-
-# prompts = [
-#     "Write an executive summary for a communications business plan",
-#     "Explain quantum computing.",
-#     "Write a poem about the first snowfall of the year.",
-#     "Write a Python function to implement a neural network from scratch, with detailed comments.",
-#     "Write a resume.",
-#     "Explain the key concepts of quantum computing and provide a Rust code example demonstrating quantum superposition.",
-#     "Explain the concept of dark matter and its significance in the universe.",
-#     "Summarize the major events of the French Revolution.",
-#     "Describe the water cycle.",
-#     "Write a Neurology ICU Admission Note.",
-#     "Describe a bustling alien marketplace on a distant planet with unique goods and creatures."
-#     "Imagine you have a magic potion that grants one wish. What would you wish for and how would it change your life?",
-#     "Compose a limerick about a clumsy robot.",
-#     "Write a JavaScript function to sort an array of objects by a specific property.",
-#     "Design a database schema for a social media platform, considering user profiles, posts, and interactions.",
-#     "Implement a basic encryption algorithm in Python.",
-# ]
-
-# # `Phi-3-Vision
-# generate(prompts, max_tokens=100)
-# # `Phi-3-Mini-128K
-# generate(prompts, max_tokens=100, blind_model=True)

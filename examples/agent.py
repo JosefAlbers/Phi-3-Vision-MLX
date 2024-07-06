@@ -1,10 +1,6 @@
 ''''
 This is a simple example of how to use the Phi-3 Vision MLX agent.
 The agent can be used for Visual Question Answering, Generative Feedback Loop, API Tool Use, and more.
-
-Author: Josef Albers
-
-More examples here: https://github.com/JosefAlbers/Phi-3-Vision-MLX
 '''
 
 import sys
