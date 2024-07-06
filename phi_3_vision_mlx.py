@@ -128,7 +128,7 @@ class TrainingCallback:
         self.lora_cfg = lora_cfg
         self.adapter_path = lora_cfg['adapter_path']
         self.lr_schedule = lr_schedule
-        self.sum_every = sum_every
+        self.sum_every = min(sum_every, len(batch_indices))
         self.current_step = 0
         self.sum_loss = .0
         self.best_loss = math.inf
@@ -176,7 +176,7 @@ class TrainingCallback:
         ax3.scatter(x,y, color='b', marker='.', alpha=0.5)
         ax3.set_title('Batch Indices')
         plt.tight_layout()
-        fig.savefig(f'train_log_{self.current_step}_{train_log['train_time']:.0f}.png')
+        fig.savefig(f'train_log_{self.current_step}_steps_in_{train_log["train_time"]:.0f}_sec.png')
         print(f"Training log saved to {self.adapter_path}")
         print(f"Total training time: {train_log['train_time']:.2f} seconds")
 
@@ -830,7 +830,7 @@ def _setup():
     for hub, local, quant in paths:
         snapshot_download(repo_id=hub, allow_patterns=["*.safetensors", "*.json"], local_dir=local)
         _quantize(from_path=local, to_path=quant)
-        train_lora(model_path=local)
+        train_lora(model_path=local, take=1)
 
 def _load(model_path=PATH_ORIGINAL_PHI3_VISION, adapter_path=None, return_mx=True, **kwargs):
     model_cfg = _get_cfg(f"{model_path}/config.json", **kwargs)
@@ -1026,7 +1026,10 @@ def get_api(prompt, n_topk=1, verbose=True):
     prompt = [prompt] if isinstance(prompt, str) else prompt
     codes = vdb([p.split('<|api_input|>')[0] for p in prompt])
     codes = [code.format(prompt=prompt[i].split('<|api_input|>')[1]) for i, sublist in enumerate(codes) for code in sublist]
-    print('Obtained api codes:\n', codes) if verbose is True else None
+    if verbose:
+        print('### Obtained api codes ###')
+        for code in codes:
+            print(code)
     return codes
 
 def mistral_api(prompt, history):
@@ -1300,8 +1303,8 @@ def train_lora(model_path=PATH_QUANTIZED_PHI3_BLIND, adapter_path=None, lora_lay
 
     def _set_lora(model_path, adapter_path, lora_layers, lora_rank):
         lora_cfg = {
-            "model_path": model_path,
-            "adapter_path": adapter_path,
+            "model_path": str(model_path),
+            "adapter_path": str(adapter_path),
             "lora_layers": lora_layers,
             "lora_parameters": {"rank": lora_rank, "alpha": lora_rank, "dropout": 0.0, "scale": 1.0},
         }
@@ -1419,7 +1422,7 @@ def test_lora(model_path=PATH_QUANTIZED_PHI3_BLIND, adapter_path=True, dataset_p
     del model
     del processor
 
-def benchmark(blind_model=False):
+def benchmark(blind_model=False, json_path='benchmark.json'):
     """
     Perform a benchmark test on different model configurations and save the results.
 
@@ -1509,9 +1512,9 @@ def benchmark(blind_model=False):
             prompt_tps, gen_tps = generate(*prompt, preload=preload, max_tokens=100, return_tps=True)
             results[method].append([i, prompt_tps, gen_tps])
         del preload
-    with open('benchmark.json', 'w') as f:
+    with open(json_path, 'w') as f:
         json.dump(results, f, indent=4)
-    _format_benchmark()
+    _format_benchmark(json_path)
 
 def load(blind_model=False, quantize_model=False, quantize_cache=False, use_adapter=False, **kwargs):
     if blind_model:
@@ -1542,5 +1545,9 @@ def generate(prompt, images=None, preload=None, blind_model=False, quantize_mode
 def execute(code_strings, file_prefix=0, verbose=True):
     code_strings = [code_strings] if isinstance(code_strings, str) else code_strings
     results = [_execute(code_string, f'{file_prefix}_{i}') for i, code_string in enumerate(code_strings)]
-    print('Execution results:', results) if verbose is True else None
+    if verbose is True:
+        print('### Execution ###')
+        for result in results:
+            for r in result:
+                print(r)
     return {k: [r[i] for r in results] for i, k in enumerate(['codes', 'files', 'souts', 'serrs'])}

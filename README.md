@@ -123,7 +123,13 @@ train_lora(
 
 ![Alt text](https://raw.githubusercontent.com/JosefAlbers/Phi-3-Vision-MLX/main/assets/train_log.png)
 
-Comparing model performance:
+Generating Text with LoRA
+
+```python
+generate("Describe the potential applications of CRISPR gene editing in medicine.", adapter_path='adapters')
+```
+
+Comparing LoRA Adapters
 
 ```python
 from phi_3_vision_mlx import test_lora
@@ -138,12 +144,6 @@ test_lora(adapter_path=True)
 
 # Test model with a specific LoRA adapter path
 test_lora(adapter_path="/path/to/your/lora/adapter")
-```
-
-Generating text with LoRA:
-
-```python
-generate("Describe the potential applications of CRISPR gene editing in medicine.", adapter_path='adapters')
 ```
 
 ### 2. Agentic Interactions
@@ -172,7 +172,10 @@ agent.end()
 #### Generative Feedback Loop
 
 ```python
+# Ask the agent to generate and execute code to create a plot
 agent('Plot a Lissajous Curve.')
+
+# Ask the agent to modify the generated code and create a new plot
 agent('Modify the code to plot 3:4 frequency')
 agent.end()
 ```
