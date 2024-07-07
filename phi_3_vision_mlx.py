@@ -1034,6 +1034,8 @@ def get_api(prompt, n_topk=1, verbose=True):
 
 def mistral_api(prompt, history):
     """
+    Example:
+    --------
     toolchain = "responses, history = mistral_api(prompt, history)"
     agent = Agent(toolchain)
     agent('Write a neurology ICU admission note')
@@ -1062,6 +1064,8 @@ def mistral_api(prompt, history):
 
 def bark_api(prompt):
     """
+    Example:
+    --------
     toolchain = "responses = bark_api(prompt)"
     agent = Agent(toolchain)
     agent('Write a neurology ICU admission note')

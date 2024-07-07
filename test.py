@@ -5,7 +5,7 @@ import shutil
 from pathlib import Path
 import io
 from contextlib import redirect_stdout
-from phi_3_vision_mlx import PATH_QUANTIZED_PHI3_VISION, Agent, train_lora, test_lora, benchmark
+from phi_3_vision_mlx import PATH_QUANTIZED_PHI3_VISION, _setup, Agent, train_lora, test_lora, benchmark
 
 class TestPhi3VisionMLX(unittest.TestCase):
     @classmethod
@@ -14,9 +14,9 @@ class TestPhi3VisionMLX(unittest.TestCase):
         cls.model_path = PATH_QUANTIZED_PHI3_VISION
         cls.tmp_dir = Path('tmp')
         cls.adapter_path = cls.tmp_dir / cls.model_path
-        print(cls.adapter_path)
         cls.json_path = cls.tmp_dir / 'benchmark.json'
         cls.tmp_dir.mkdir(exist_ok=True)
+        _setup()
 
         try:
             train_lora(
@@ -34,6 +34,8 @@ class TestPhi3VisionMLX(unittest.TestCase):
         except Exception as e:
             print(f"LoRA training failed: {str(e)}")
             raise unittest.SkipTest(f"Failed to train LoRA: {str(e)}")
+        if not cls.adapter_path.exists():
+            raise AssertionError("Adapter files should be created")
 
     def test_multi_turn_vqa(self):
         response1 = self.agent('What is shown in this image?', 'https://collectionapi.metmuseum.org/api/collection/v1/iiif/344291/725918/main-image')

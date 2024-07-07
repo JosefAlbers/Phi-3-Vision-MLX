@@ -65,17 +65,15 @@ To instead use the library in a Python script:
 from phi_3_vision_mlx import generate
 ```
 
-## Usage Examples
+## 1. Core Functionalities
 
-### 1. Core Functionalities
-
-#### Visual Question Answering
+### Visual Question Answering
 
 ```python
 generate('What is shown in this image?', 'https://collectionapi.metmuseum.org/api/collection/v1/iiif/344291/725918/main-image')
 ```
 
-#### Batch Text Generation
+### Batch Text Generation
 
 ```python
 # A list of prompts for batch generation
@@ -94,7 +92,7 @@ generate(prompts, max_tokens=100)
 generate(prompts, max_tokens=100, blind_model=True)
 ```
 
-#### Model and Cache Quantization
+### Model and Cache Quantization
 
 ```python
 # Model quantization
@@ -104,9 +102,9 @@ generate("Describe the water cycle.", quantize_model=True)
 generate("Explain quantum computing.", quantize_cache=True)
 ```
 
-#### LoRA Fine-tuning
+### LoRA Fine-tuning
 
-Training a LoRA Adapter:
+Training a LoRA Adapter
 
 ```python
 from phi_3_vision_mlx import train_lora
@@ -146,9 +144,9 @@ test_lora(adapter_path=True)
 test_lora(adapter_path="/path/to/your/lora/adapter")
 ```
 
-### 2. Agentic Interactions
+## 2. Agentic Interactions
 
-#### Multi-turn Conversations
+### Multi-turn Conversation
 
 ```python
 from phi_3_vision_mlx import Agent
@@ -169,7 +167,7 @@ agent.end()
 
 ![Alt text](https://raw.githubusercontent.com/JosefAlbers/Phi-3-Vision-MLX/main/assets/vqa.png)
 
-#### Generative Feedback Loop
+### Generative Feedback Loop
 
 ```python
 # Ask the agent to generate and execute code to create a plot
@@ -182,7 +180,7 @@ agent.end()
 
 ![Alt text](https://raw.githubusercontent.com/JosefAlbers/Phi-3-Vision-MLX/main/assets/coding_agent.png)
 
-#### API Integration
+### External API Tool Use
 
 ```python
 # Request the agent to generate an image
@@ -196,9 +194,9 @@ agent.end()
 
 ![Alt text](https://raw.githubusercontent.com/JosefAlbers/Phi-3-Vision-MLX/main/assets/api_agent.png)
 
-### 3. Custom Agent Toolchains
+## 3. Custom Toolchains
 
-#### Example 1. In-Context Learning Agent
+### Example 1. In-Context Learning Agent
 
 ```python
 from phi_3_vision_mlx import load_text
@@ -221,7 +219,7 @@ agent = Agent(toolchain, early_stop=100)
 agent('How to inspect API endpoints? @https://raw.githubusercontent.com/gradio-app/gradio/main/guides/08_gradio-clients-and-lite/01_getting-started-with-the-python-client.md')
 ```
 
-#### Example 2. Retrieval Augmented Coding Agent
+### Example 2. Retrieval Augmented Coding Agent
 
 ```python
 from phi_3_vision_mlx import VDB
@@ -251,7 +249,7 @@ agent = Agent(toolchain_plot, False)
 _, images = agent(user_input)
 ```
 
-#### Example 3. Multi-Agent Interaction
+### Example 3. Multi-Agent Interaction
 
 ```python
 # Continued from Example 2 above
