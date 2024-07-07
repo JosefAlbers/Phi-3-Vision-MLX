@@ -10,20 +10,20 @@ from phi_3_vision_mlx import PATH_QUANTIZED_PHI3_VISION, _setup, Agent, train_lo
 class TestPhi3VisionMLX(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
+        _setup()
         cls.agent = Agent()
         cls.model_path = PATH_QUANTIZED_PHI3_VISION
         cls.tmp_dir = Path('tmp')
         cls.adapter_path = cls.tmp_dir / cls.model_path
         cls.json_path = cls.tmp_dir / 'benchmark.json'
         cls.tmp_dir.mkdir(exist_ok=True)
-        _setup()
 
         try:
             train_lora(
                 model_path=cls.model_path,
                 adapter_path=cls.adapter_path,
                 lora_layers=2,
-                lora_rank=4,
+                lora_rank=2,
                 epochs=2,
                 take=4,
                 batch_size=2,

@@ -9,6 +9,7 @@ import datasets
 import random
 import textwrap
 import subprocess
+from functools import partial
 import mlx.core as mx
 import mlx.nn as nn
 import numpy as np
@@ -51,8 +52,9 @@ class Tic:
         return elapsed_time
 
 class Streamer:
-    def __init__(self, processor, stream):
+    def __init__(self, processor, stream, mute):
         self.tokenizer = processor.tokenizer
+        self.mute = mute
         self.stream = stream
         self.list_tokens = []
         self.idx_sofar = 0
@@ -78,8 +80,9 @@ class Streamer:
         else:
             arr_tokens = mx.concatenate(self.list_tokens, axis=1)
             list_txt = [self.tokenizer.decode(i[:i.index(ID_EOS)+1] if ID_EOS in i else i) for i in arr_tokens.tolist()]
-            for i, gen in enumerate(list_txt):
-                print(f'\n< Generated text for prompt #{i} >\n{gen}')
+            if self.mute is False:
+                for i, gen in enumerate(list_txt):
+                    print(f'\n< Generated text for prompt #{i} >\n{gen}')
             return list_txt, arr_tokens.size
 
 class LogitStopper:
@@ -95,10 +98,9 @@ class LogitStopper:
         if logits.shape[0] > 1:
             self.early_stop = False
             return False
-        log_prob = nn.log_softmax(logits)
-        log_prob_best = mx.max(log_prob[:,-1,:], axis=-1).item()
-        log_prob_eos = log_prob[:,-1,ID_EOS].item()
-
+        log_prob = nn.log_softmax(logits[:,-1,:])
+        log_prob_best = mx.max(log_prob, axis=-1).item()
+        log_prob_eos = log_prob[:,ID_EOS].item()
         if log_prob_eos > self.best_eos_sofar:
             self.log_prob_sum_since_last_best_eos = self.log_prob_sum - self.log_prob_sum_at_best_eos
             if ((self.log_prob_sum_since_last_best_eos) < (self.best_eos_sofar)) and (self.step > self.early_stop):
@@ -936,12 +938,12 @@ def _get_wt(model_path, model_cfg):
         return [(k, v) for wf in glob.glob(f"{model_path}/*.safetensors") for k, v in mx.load(wf).items()]
     return [(k, v.transpose(0, 2, 3, 1) if "patch_embedding.weight" in k else v) for wf in glob.glob(f"{model_path}/*.safetensors") for k, v in mx.load(wf).items()]
 
-def _generate(model, processor, prompt, images=None, max_tokens=1000, verbose=True, return_tps=False, early_stop=False, stream=True):
+def _generate(model, processor, prompt, images=None, max_tokens=1000, verbose=True, return_tps=False, early_stop=False, stream=True, mute=False):
     if images is not None and isinstance(prompt, list):
         raise ValueError('Images cannot be provided when prompt is a list')
     logit_stopper = LogitStopper(max_tokens, early_stop)
     token_stopper = TokenStopper(processor)
-    streamer = Streamer(processor, stream)
+    streamer = Streamer(processor, stream, mute)
     dict_input = processor(prompt, images)
     tic = Tic()
     logits, cache = model(**dict_input, max_tokens=max_tokens)
@@ -1005,7 +1007,7 @@ def _format_benchmark(json_path='benchmark.json'):
         markdown_table += format_task_data(i)
     print(markdown_table)
 
-def load_text(file_path):
+def _load_text(file_path):
     file_path = file_path.strip()
     parsed_url = urlparse(file_path)
     if parsed_url.scheme in ('http', 'https'):
@@ -1022,14 +1024,63 @@ def load_text(file_path):
             return_text = file_path
     return return_text.replace('"', "'")
 
+def _score(model, processor, prompts):
+    dict_input = processor(prompts)
+    logits, _ = model(**dict_input, max_tokens=0)
+    logits = nn.log_softmax(logits)
+    input_ids = dict_input['input_ids']
+    mask = dict_input['mask']
+    batch_size, seq_length, vocab_size = logits.shape
+    row_indices = mx.arange(batch_size)[:, None]
+    col_indices = mx.arange(seq_length - 1)[None, :]
+    token_indices = input_ids[:, 1:]
+    next_token_logits = logits[row_indices, col_indices, token_indices]
+    masked_logits = next_token_logits * mask[:, 1:]
+    logit_sums = masked_logits.sum(axis=1)
+    return logit_sums
+
+def _choose(model, processor, prompts, appends=None, return_idx=False):
+    if isinstance(appends, list):
+        prompts = [prompt + str(a) for prompt in prompts for a in appends]
+    scores = _score(model, processor, prompts)
+    choices = prompts
+    if appends is None:
+        scores = [scores.argmax().item()]
+    elif isinstance(appends, int):
+        scores = scores.reshape((-1, appends)).argmax(axis=-1).tolist()
+    elif isinstance(appends, list):
+        scores = scores.reshape((-1, len(appends))).argmax(axis=-1).tolist()
+        choices = appends
+    else:
+        raise ValueError('appends must be of type None, int, or list')
+    if return_idx:
+        return scores
+    return [choices[i] for i in scores]
+
+def _choose_from(model, processor, prompts, choices='ABCDE'):
+    def _ord(s):
+        return processor([f' {i}' for i in s])['input_ids'][:,-1]
+    options = _ord(choices)
+    dict_input = processor(prompts)
+    logits, _ = model(**dict_input, max_tokens=0)
+    logits = nn.log_softmax(logits[:,-1,:])
+    indices = mx.argmax(logits[:, options], axis=-1).tolist()
+    return [choices[i] for i in indices]
+
 def add_code(prompt, codes):
     return prompt if codes is None else [f'{prompt}\n\n```python\n{code}\n```\n' for code in codes]
 
 def get_api(prompt, n_topk=1, verbose=True):
+    """
+    Example:
+    --------
+    agent = Agent(toolchain = "responses = get_api(prompt)")
+    agent('Draw <|api_input|> A perfectly red apple, 32k HDR, studio lighting')
+    """
     vdb = VDB()
     prompt = [prompt] if isinstance(prompt, str) else prompt
     codes = vdb([p.split('<|api_input|>')[0] for p in prompt])
-    codes = [code.format(prompt=prompt[i].split('<|api_input|>')[1]) for i, sublist in enumerate(codes) for code in sublist]
+    codes = [code.format(prompt=prompt[i].split('<|api_input|>')[1].strip()) for i, sublist in enumerate(codes) for code in sublist]
     if verbose:
         print('### Obtained api codes ###')
         for code in codes:
@@ -1040,8 +1091,7 @@ def mistral_api(prompt, history):
     """
     Example:
     --------
-    toolchain = "responses, history = mistral_api(prompt, history)"
-    agent = Agent(toolchain)
+    agent = Agent(toolchain = "responses, history = mistral_api(prompt, history)")
     agent('Write a neurology ICU admission note')
     """
     history = '<s>' if history is None else history
@@ -1070,8 +1120,7 @@ def bark_api(prompt):
     """
     Example:
     --------
-    toolchain = "responses = bark_api(prompt)"
-    agent = Agent(toolchain)
+    agent = Agent(toolchain = "responses = bark_api(prompt)")
     agent('Write a neurology ICU admission note')
     """
     client = InferenceClient("suno/bark-small", token = os.environ.get('HF_READ_TOKEN', False))
@@ -1198,7 +1247,7 @@ def chatui(agent=None):
     demo.queue()
     demo.launch(inbrowser=True, inline=True)
 
-def train_lora(model_path=PATH_QUANTIZED_PHI3_BLIND, adapter_path=None, lora_layers=1, lora_rank=1, epochs=1, batch_size=1, take=10, lr=1e-4, warmup=.5, mask_ratios=None, dataset_path="JosefAlbers/akemiH_MedQA_Reason"): # or mask_ratios=[.0, .1, .3, .5]
+def train_lora(model_path=PATH_QUANTIZED_PHI3_BLIND, adapter_path=None, lora_layers=1, lora_rank=1, epochs=1, batch_size=1, take=10, lr=1e-4, warmup=.5, mask_ratios=None, dataset_path="JosefAlbers/akemiH_MedQA_Reason"):
     """
     Train a LoRA (Low-Rank Adaptation) model using the specified parameters.
 
@@ -1351,12 +1400,12 @@ def train_lora(model_path=PATH_QUANTIZED_PHI3_BLIND, adapter_path=None, lora_lay
     del model
     del processor
 
-def test_lora(model_path=PATH_QUANTIZED_PHI3_BLIND, adapter_path=True, dataset_path="JosefAlbers/akemiH_MedQA_Reason", take=10):
+def test_lora(model_path=PATH_QUANTIZED_PHI3_BLIND, adapter_path=True, dataset_path="JosefAlbers/akemiH_MedQA_Reason", take=(0, 10), batch_size=10):
     """
     Test a LoRA (Low-Rank Adaptation) model on a given dataset.
 
     This function loads a model and its LoRA adapter, processes a dataset, and evaluates the model's
-    performance on recall and answer generation tasks.
+    performance on recall (summarization) and answer generation tasks.
 
     Parameters:
     -----------
@@ -1367,31 +1416,37 @@ def test_lora(model_path=PATH_QUANTIZED_PHI3_BLIND, adapter_path=True, dataset_p
         If None, the model without adapter is tested. Defaults to True.
     dataset_path : str, optional
         Path to the dataset to be used for testing. Defaults to "JosefAlbers/akemiH_MedQA_Reason".
-    take : int, optional
-        Number of samples to take from the dataset. Defaults to 10.
+    take : tuple of int, optional
+        Range of samples to take from the dataset, in the format (start, end). Defaults to (0, 10).
+    batch_size : int, optional
+        Number of samples to process in each batch. Defaults to 10.
 
     Returns:
     --------
     None
-        The function prints the evaluation results and doesn't return any value.
+        The function prints the evaluation results, including generation time, prediction time,
+        and final score, but doesn't return any value.
 
     Notes:
     ------
-    - The function uses two internal functions: _try for generating responses and evaluating them.
+    - The function uses an internal function _try for generating responses and evaluating them.
     - It performs two tasks: recall (summarization) and answer generation.
-    - The function prints comparison between generated and true responses, and a final score.
+    - For recall, it generates a summary and compares it with the true summary.
+    - For answer generation, it chooses an answer from options A-E and compares with the correct answer.
+    - The function prints comparisons between generated and true responses for the recall task.
     - After completion, it deletes the model and processor to free up memory.
 
     Example:
     --------
-    >>> test_lora(model_path="path/to/model", adapter_path="path/to/adapter", dataset_path="dataset/path", take=20)
+    >>> test_lora(model_path="path/to/model", adapter_path="path/to/adapter",
+    ...           dataset_path="dataset/path", take=(0, 10), batch_size=10)
     """
-    def _try(example, q_col, q_until, q_format, max_tokens, a_col, c_col=None, verbose=True):
+    def _try(example, q_col, q_until, q_format, fxn, a_col, c_col, verbose=True):
         questions = example[q_col]
         if q_until is not None:
             questions = [i.rsplit(q_until, 1)[0].strip() for i in questions]
         prompts_answer = [f"<|user|>\n{i}<|end|>\n<|assistant|>{q_format}" for i in questions]
-        attempts = _generate(model, processor, prompts_answer, max_tokens=max_tokens+2, verbose=False)
+        attempts = fxn(model, processor, prompts_answer)
         example[a_col] = [i.strip() for i in attempts]
         if c_col is not None and verbose is True:
             print('### Compare ###')
@@ -1404,28 +1459,29 @@ def test_lora(model_path=PATH_QUANTIZED_PHI3_BLIND, adapter_path=True, dataset_p
     if adapter_path is True:
         adapter_path = f'{PATH_ADAPTERS}/{model_path}'
     model, processor = _load(model_path=model_path, adapter_path=adapter_path)
-    ds = datasets.load_dataset(dataset_path, split='train').take(take)
+    ds = datasets.load_dataset(dataset_path, split='train')
+    ds = ds.select(range(*take), keep_in_memory=True)
     _recall_args = {
         'q_col':'input',
         'q_until':' A: ',
         'q_format':'',
-        'max_tokens':30,
+        'fxn':partial(_generate, max_tokens=30, verbose=False, mute=True),
         'a_col':'recall',
         'c_col':'summary',
         'verbose':True
     }
-    ds = ds.map(_try, batched=True, fn_kwargs=_recall_args)
+    ds = ds.map(_try, batched=True, batch_size=batch_size, fn_kwargs=_recall_args)
     _answer_args = {
         'q_col':'input',
         'q_until':None,
         'q_format':'\nThe correct answer is',
-        'max_tokens':1,
+        'fxn':partial(_choose_from, choices='ABCDE'),
         'a_col':'attempt',
         'c_col':'output',
         'verbose':False,
     }
-    ds = ds.map(_try, batched=True, fn_kwargs=_answer_args)
-    num_recall = len(ds.filter(lambda x: x["output"] == x["attempt"][0]))
+    ds = ds.map(_try, batched=True, batch_size=batch_size, fn_kwargs=_answer_args)
+    num_recall = len(ds.filter(lambda x: x["output"] == x["attempt"]))
     print(f'Score: {num_recall/len(ds)}({num_recall}/{len(ds)})')
     del model
     del processor

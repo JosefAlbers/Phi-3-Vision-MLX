@@ -202,12 +202,12 @@ agent.end()
 ### Example 1. In-Context Learning Agent
 
 ```python
-from phi_3_vision_mlx import load_text
+from phi_3_vision_mlx import _load_text
 
 # Create a custom tool named 'add_text'
 def add_text(prompt):
     prompt, path = prompt.split('@')
-    return f'{load_text(path)}\n<|end|>\n<|user|>{prompt}'
+    return f'{_load_text(path)}\n<|end|>\n<|user|>{prompt}'
 
 # Define the toolchain as a string
 toolchain = """
