@@ -124,7 +124,10 @@ train_lora(
 Generating Text with LoRA
 
 ```python
-generate("Describe the potential applications of CRISPR gene editing in medicine.", adapter_path='adapters')
+generate("Describe the potential applications of CRISPR gene editing in medicine.",
+    blind_model=True,
+    quantize_model=True,
+    use_adapter=True)
 ```
 
 Comparing LoRA Adapters

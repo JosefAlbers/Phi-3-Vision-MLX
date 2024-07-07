@@ -924,8 +924,12 @@ def _get_cfg(json_path, **kwargs):
         with open(json_path, "r") as f:
             cfg = SimpleNamespace(**(json.load(f)|kwargs))
         return cfg
-    except:
-        return False
+    except FileNotFoundError:
+        raise FileNotFoundError(f"Configuration file not found: {json_path}")
+    except json.JSONDecodeError:
+        raise ValueError(f"Invalid JSON in configuration file: {json_path}")
+    except Exception as e:
+        raise RuntimeError(f"Error loading configuration from {json_path}: {str(e)}")
 
 def _get_wt(model_path, model_cfg):
     if getattr(model_cfg, 'sanitized', False):
