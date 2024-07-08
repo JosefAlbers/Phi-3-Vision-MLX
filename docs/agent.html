@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+
+<html lang="en" data-content_root="./">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+    <title>Agent Interactions &#8212; phi-3-vision-mlx 0.0.8-alpha documentation</title>
+    <link rel="stylesheet" type="text/css" href="_static/pygments.css?v=d1102ebc" />
+    <link rel="stylesheet" type="text/css" href="_static/alabaster.css?v=57b72bbe" />
+    <script src="_static/documentation_options.js?v=0c1e2857"></script>
+    <script src="_static/doctools.js?v=9a2dae69"></script>
+    <script src="_static/sphinx_highlight.js?v=dc90522c"></script>
+    <link rel="index" title="Index" href="genindex.html" />
+    <link rel="search" title="Search" href="search.html" />
+    <link rel="next" title="Custom Toolchains" href="toolchain.html" />
+    <link rel="prev" title="LoRA Fine-tuning" href="train.html" />
+   
+  <link rel="stylesheet" href="_static/custom.css" type="text/css" />
+  
+
+  
+  
+
+  </head><body>
+  <div class="document">
+    
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="index.html">phi-3-vision-mlx</a></h1>
+
+
+
+<p class="blurb">A versatile AI framework leveraging Phi-3-Vision and Phi-3-Mini-128K models.</p>
+
+
+
+
+<p>
+<iframe src="https://ghbtns.com/github-btn.html?user=JosefAlbers&repo=Phi-3-Vision-MLX&type=star&count=true&size=large&v=2"
+  allowtransparency="true" frameborder="0" scrolling="0" width="200px" height="35px"></iframe>
+</p>
+
+
+
+
+
+<h3>Navigation</h3>
+<p class="caption" role="heading"><span class="caption-text">Contents</span></p>
+<ul class="current">
+<li class="toctree-l1"><a class="reference internal" href="install.html">Installation</a></li>
+<li class="toctree-l1"><a class="reference internal" href="generate.html">Text Generation</a></li>
+<li class="toctree-l1"><a class="reference internal" href="train.html">LoRA Fine-tuning</a></li>
+<li class="toctree-l1 current"><a class="current reference internal" href="#">Agent Interactions</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="#multi-turn-conversation">Multi-turn Conversation</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#generative-feedback-loop">Generative Feedback Loop</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#external-api-tool-use">External API Tool Use</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="toolchain.html">Custom Toolchains</a></li>
+<li class="toctree-l1"><a class="reference internal" href="benchmark.html">Benchmark</a></li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">API Reference</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="module.html">Classes</a></li>
+<li class="toctree-l1"><a class="reference internal" href="module.html#functions">Functions</a></li>
+</ul>
+
+<div class="relations">
+<h3>Related Topics</h3>
+<ul>
+  <li><a href="index.html">Documentation overview</a><ul>
+      <li>Previous: <a href="train.html" title="previous chapter">LoRA Fine-tuning</a></li>
+      <li>Next: <a href="toolchain.html" title="next chapter">Custom Toolchains</a></li>
+  </ul></li>
+</ul>
+</div>
+<search id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"/>
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</search>
+<script>document.getElementById('searchbox').style.display = "block"</script>
+
+
+
+
+
+
+
+
+        </div>
+      </div>
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="agent-interactions">
+<h1>Agent Interactions<a class="headerlink" href="#agent-interactions" title="Link to this heading">¶</a></h1>
+<section id="multi-turn-conversation">
+<h2>Multi-turn Conversation<a class="headerlink" href="#multi-turn-conversation" title="Link to this heading">¶</a></h2>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span> <span class="nn">phi_3_vision_mlx</span> <span class="kn">import</span> <span class="n">Agent</span>
+
+<span class="c1"># Create an instance of the Agent</span>
+<span class="n">agent</span> <span class="o">=</span> <span class="n">Agent</span><span class="p">()</span>
+
+<span class="c1"># First interaction: Analyze an image</span>
+<span class="n">agent</span><span class="p">(</span><span class="s1">&#39;Analyze this image and describe the architectural style:&#39;</span><span class="p">,</span> <span class="s1">&#39;https://images.metmuseum.org/CRDImages/rl/original/DP-19531-075.jpg&#39;</span><span class="p">)</span>
+
+<span class="c1"># Second interaction: Follow-up question</span>
+<span class="n">agent</span><span class="p">(</span><span class="s1">&#39;What historical period does this architecture likely belong to?&#39;</span><span class="p">)</span>
+
+<span class="c1"># End the conversation</span>
+<span class="n">agent</span><span class="o">.</span><span class="n">end</span><span class="p">()</span>
+</pre></div>
+</div>
+</section>
+<section id="generative-feedback-loop">
+<h2>Generative Feedback Loop<a class="headerlink" href="#generative-feedback-loop" title="Link to this heading">¶</a></h2>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="c1"># Ask the agent to generate and execute code to create a plot</span>
+<span class="n">agent</span><span class="p">(</span><span class="s1">&#39;Plot a Lissajous Curve.&#39;</span><span class="p">)</span>
+
+<span class="c1"># Ask the agent to modify the generated code and create a new plot</span>
+<span class="n">agent</span><span class="p">(</span><span class="s1">&#39;Modify the code to plot 3:4 frequency&#39;</span><span class="p">)</span>
+<span class="n">agent</span><span class="o">.</span><span class="n">end</span><span class="p">()</span>
+</pre></div>
+</div>
+</section>
+<section id="external-api-tool-use">
+<h2>External API Tool Use<a class="headerlink" href="#external-api-tool-use" title="Link to this heading">¶</a></h2>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="c1"># Request the agent to generate an image</span>
+<span class="n">agent</span><span class="p">(</span><span class="s1">&#39;Draw &quot;A perfectly red apple, 32k HDR, studio lighting&quot;&#39;</span><span class="p">)</span>
+<span class="n">agent</span><span class="o">.</span><span class="n">end</span><span class="p">()</span>
+
+<span class="c1"># Request the agent to convert text to speech</span>
+<span class="n">agent</span><span class="p">(</span><span class="s1">&#39;Speak &quot;People say nothing is impossible, but I do nothing every day.&quot;&#39;</span><span class="p">)</span>
+<span class="n">agent</span><span class="o">.</span><span class="n">end</span><span class="p">()</span>
+</pre></div>
+</div>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+    <div class="clearer"></div>
+  </div>
+    <div class="footer">
+      &#169;2024, Josef Albers.
+      
+      |
+      Powered by <a href="https://www.sphinx-doc.org/">Sphinx 7.3.7</a>
+      &amp; <a href="https://alabaster.readthedocs.io">Alabaster 0.7.16</a>
+      
+      |
+      <a href="_sources/agent.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+    <a href="https://github.com/JosefAlbers/Phi-3-Vision-MLX" class="github">
+        <img style="position: absolute; top: 0; right: 0; border: 0;" src="https://github.blog/wp-content/uploads/2008/12/forkme_right_darkblue_121621.png" alt="Fork me on GitHub"  class="github"/>
+    </a>
+    
+
+    
+  </body>
+</html>
