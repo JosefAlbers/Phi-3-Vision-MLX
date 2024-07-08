@@ -2,42 +2,6 @@
 
 Phi-3-MLX is a versatile AI framework that leverages both the Phi-3-Vision multimodal model and the recently updated ([July 2, 2024](https://x.com/reach_vb/status/1808056108319179012)) Phi-3-Mini-128K language model, optimized for Apple Silicon using the MLX framework. This project provides an easy-to-use interface for a wide range of AI tasks, from advanced text generation to visual question answering and code execution.
 
-## Recent Updates: Phi-3 Mini Improvements
-
-Microsoft has recently released significant updates to the Phi-3 Mini model, dramatically improving its capabilities:
-
-- Substantially enhanced code understanding in Python, C++, Rust, and TypeScript
-- Improved post-training for better-structured output
-- Enhanced multi-turn instruction following
-- Added support for the `<|system|>` tag
-- Improved reasoning and long-context understanding
-
-
-| Benchmarks | Original | June 2024 Update |
-| :-         | :-       | :-               |
-| Instruction Extra Hard | 5.7 | 5.9 |
-| Instruction Hard | 5.0 | 5.2 |
-| JSON Structure Output | 1.9 | 60.1 |
-| XML Structure Output | 47.8 | 52.9 |
-| GPQA	| 25.9	| 29.7 |
-| MMLU	| 68.1	| 69.7 |
-| **Average**	| **25.7**	| **37.3** |
-
-RULER: a retrieval-based benchmark for long context understanding
-
-| Model             | 4K   | 8K   | 16K  | 32K  | 64K  | 128K | Average |
-| :-------------------| :------| :------| :------| :------| :------| :------| :---------|
-| Original          | 86.7 | 78.1 | 75.6 | 70.3 | 58.9 | 43.3 | **68.8**    |
-| June 2024 Update  | 92.4 | 91.1 | 90.8 | 87.9 | 79.8 | 65.6 | **84.6**    |
-
-RepoQA: a benchmark for long context code understanding
-
-| Model             | Python | C++ | Rust | Java | TypeScript | Average |
-| :-------------------| :--------| :-----| :------| :------| :------------| :---------|
-| Original          | 27     | 29  | 40   | 33   | 33         | **32.4**    |
-| June 2024 Update  | 85     | 63  | 72   | 93   | 72         | **77**      |
-
-
 ## Features
 
 - Support for the newly updated Phi-3-Mini-128K (language-only) model
@@ -275,6 +239,12 @@ benchmark()
 | Batched Generation    |  103.47 tps     |  182.83 tps      |  38.72 tps       |  101.02 tps    |
 
 *(On M1 Max 64GB)*
+
+## Documentation
+
+API references and additional information are available at:
+
+https://josefalbers.github.io/Phi-3-Vision-MLX/
 
 ## License
 
