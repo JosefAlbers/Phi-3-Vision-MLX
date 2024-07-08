@@ -45,7 +45,6 @@
 
 
 <h3>Navigation</h3>
-<p class="caption" role="heading"><span class="caption-text">Contents</span></p>
 <ul>
 <li class="toctree-l1"><a class="reference internal" href="install.html">Installation</a></li>
 <li class="toctree-l1"><a class="reference internal" href="generate.html">Text Generation</a></li>
@@ -54,7 +53,6 @@
 <li class="toctree-l1"><a class="reference internal" href="toolchain.html">Custom Toolchains</a></li>
 <li class="toctree-l1"><a class="reference internal" href="benchmark.html">Benchmark</a></li>
 </ul>
-<p class="caption" role="heading"><span class="caption-text">API Reference</span></p>
 <ul>
 <li class="toctree-l1"><a class="reference internal" href="module.html">Classes</a></li>
 <li class="toctree-l1"><a class="reference internal" href="module.html#functions">Functions</a></li>
@@ -98,8 +96,23 @@
 <h1>Welcome to phi-3-vision-mlx’s documentation!<a class="headerlink" href="#welcome-to-phi-3-vision-mlx-s-documentation" title="Link to this heading">¶</a></h1>
 <p>Phi-3-MLX is a versatile AI framework that leverages both the Phi-3-Vision multimodal model and the recently updated Phi-3-Mini-128K language model, optimized for Apple Silicon using the MLX framework.</p>
 <p><a class="reference external" href="https://github.com/JosefAlbers/Phi-3-Vision-MLX">View the project on GitHub</a></p>
+<section id="features">
+<h2>Features<a class="headerlink" href="#features" title="Link to this heading">¶</a></h2>
+<ul class="simple">
+<li><p>Support for the newly updated Phi-3-Mini-128K (language-only) model</p></li>
+<li><p>Integration with Phi-3-Vision (multimodal) model</p></li>
+<li><p>Optimized performance on Apple Silicon using MLX</p></li>
+<li><p>Batched generation for processing multiple prompts</p></li>
+<li><p>Flexible agent system for various AI tasks</p></li>
+<li><p>Custom toolchains for specialized workflows</p></li>
+<li><p>Model quantization for improved efficiency</p></li>
+<li><p>LoRA fine-tuning capabilities</p></li>
+<li><p>API integration for extended functionality (e.g., image generation, text-to-speech)</p></li>
+</ul>
+</section>
+<section id="usage">
+<h2>Usage<a class="headerlink" href="#usage" title="Link to this heading">¶</a></h2>
 <div class="toctree-wrapper compound">
-<p class="caption" role="heading"><span class="caption-text">Contents</span></p>
 <ul>
 <li class="toctree-l1"><a class="reference internal" href="install.html">Installation</a></li>
 <li class="toctree-l1"><a class="reference internal" href="generate.html">Text Generation</a><ul>
@@ -129,38 +142,15 @@
 <li class="toctree-l1"><a class="reference internal" href="benchmark.html">Benchmark</a></li>
 </ul>
 </div>
+</section>
+<section id="api-reference">
+<h2>API Reference<a class="headerlink" href="#api-reference" title="Link to this heading">¶</a></h2>
 <div class="toctree-wrapper compound">
-<p class="caption" role="heading"><span class="caption-text">API Reference</span></p>
 <ul>
 <li class="toctree-l1"><a class="reference internal" href="module.html">Classes</a></li>
 <li class="toctree-l1"><a class="reference internal" href="module.html#functions">Functions</a></li>
 </ul>
 </div>
-<section id="features">
-<h2>Features<a class="headerlink" href="#features" title="Link to this heading">¶</a></h2>
-<ul class="simple">
-<li><p>Support for the newly updated Phi-3-Mini-128K (language-only) model</p></li>
-<li><p>Integration with Phi-3-Vision (multimodal) model</p></li>
-<li><p>Optimized performance on Apple Silicon using MLX</p></li>
-<li><p>Batched generation for processing multiple prompts</p></li>
-<li><p>Flexible agent system for various AI tasks</p></li>
-<li><p>Custom toolchains for specialized workflows</p></li>
-<li><p>Model quantization for improved efficiency</p></li>
-<li><p>LoRA fine-tuning capabilities</p></li>
-<li><p>API integration for extended functionality (e.g., image generation, text-to-speech)</p></li>
-</ul>
-</section>
-<section id="recent-updates-phi-3-mini-improvements">
-<h2>Recent Updates: Phi-3 Mini Improvements<a class="headerlink" href="#recent-updates-phi-3-mini-improvements" title="Link to this heading">¶</a></h2>
-<p>Microsoft has recently released significant updates to the Phi-3 Mini model, dramatically improving its capabilities:</p>
-<ul class="simple">
-<li><p>Substantially enhanced code understanding in Python, C++, Rust, and TypeScript</p></li>
-<li><p>Improved post-training for better-structured output</p></li>
-<li><p>Enhanced multi-turn instruction following</p></li>
-<li><p>Added support for the <cite>&lt;|system|&gt;</cite> tag</p></li>
-<li><p>Improved reasoning and long-context understanding</p></li>
-</ul>
-<p>For detailed benchmark results, please refer to the tables in the README.</p>
 </section>
 <section id="license">
 <h2>License<a class="headerlink" href="#license" title="Link to this heading">¶</a></h2>

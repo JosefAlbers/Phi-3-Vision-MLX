@@ -11,10 +11,30 @@ Agent
 Functions
 ---------
 
-add_code
+load
+^^^^
+
+.. autofunction:: phi_3_vision_mlx.load
+
+generate
 ^^^^^^^^
 
-.. autofunction:: phi_3_vision_mlx.add_code
+.. autofunction:: phi_3_vision_mlx.generate
+
+execute
+^^^^^^^
+
+.. autofunction:: phi_3_vision_mlx.execute
+
+train_lora
+^^^^^^^^^^
+
+.. autofunction:: phi_3_vision_mlx.train_lora
+
+test_lora
+^^^^^^^^^
+
+.. autofunction:: phi_3_vision_mlx.test_lora
 
 benchmark
 ^^^^^^^^^
@@ -26,32 +46,12 @@ chatui
 
 .. autofunction:: phi_3_vision_mlx.chatui
 
-execute
-^^^^^^^
-
-.. autofunction:: phi_3_vision_mlx.execute
-
-generate
-^^^^^^^^
-
-.. autofunction:: phi_3_vision_mlx.generate
-
 get_api
 ^^^^^^^
 
 .. autofunction:: phi_3_vision_mlx.get_api
 
-load
-^^^^
+add_code
+^^^^^^^^
 
-.. autofunction:: phi_3_vision_mlx.load
-
-test_lora
-^^^^^^^^^
-
-.. autofunction:: phi_3_vision_mlx.test_lora
-
-train_lora
-^^^^^^^^^^
-
-.. autofunction:: phi_3_vision_mlx.train_lora
+.. autofunction:: phi_3_vision_mlx.add_code

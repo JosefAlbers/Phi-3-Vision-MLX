@@ -7,23 +7,6 @@ Phi-3-MLX is a versatile AI framework that leverages both the Phi-3-Vision multi
 
 `View the project on GitHub <https://github.com/JosefAlbers/Phi-3-Vision-MLX>`_
 
-.. toctree::
-   :maxdepth: 2
-   :caption: Contents
-
-   install
-   generate
-   train
-   agent
-   toolchain
-   benchmark
-
-.. toctree::
-   :maxdepth: 1
-   :caption: API Reference
-
-   module
-
 Features
 --------
 
@@ -37,18 +20,25 @@ Features
 - LoRA fine-tuning capabilities
 - API integration for extended functionality (e.g., image generation, text-to-speech)
 
-Recent Updates: Phi-3 Mini Improvements
----------------------------------------
+Usage
+-----
+.. toctree::
+   :maxdepth: 2
 
-Microsoft has recently released significant updates to the Phi-3 Mini model, dramatically improving its capabilities:
+   install
+   generate
+   train
+   agent
+   toolchain
+   benchmark
 
-- Substantially enhanced code understanding in Python, C++, Rust, and TypeScript
-- Improved post-training for better-structured output
-- Enhanced multi-turn instruction following
-- Added support for the `<|system|>` tag
-- Improved reasoning and long-context understanding
+API Reference
+-------------
 
-For detailed benchmark results, please refer to the tables in the README.
+.. toctree::
+   :maxdepth: 1
+
+   module
 
 License
 -------
