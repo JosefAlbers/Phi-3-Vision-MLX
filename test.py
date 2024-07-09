@@ -1,17 +1,19 @@
-import unittest
-import sys
+import io
 import os
 import shutil
-from pathlib import Path
-import io
+import sys
+import unittest
 from contextlib import redirect_stdout
-from phi_3_vision_mlx import PATH_QUANTIZED_PHI3_VISION, _setup, Agent, train_lora, test_lora, benchmark
+from pathlib import Path
+
+from phi_3_vision_mlx import (PATH_QUANTIZED_PHI3_VISION, Agent, _setup,
+                              benchmark, test_lora, train_lora)
 
 class TestPhi3VisionMLX(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         _setup()
-        cls.agent = Agent()
+        cls.agent = Agent(quantize_model=True)
         cls.model_path = PATH_QUANTIZED_PHI3_VISION
         cls.tmp_dir = Path('tmp')
         cls.adapter_path = cls.tmp_dir / cls.model_path

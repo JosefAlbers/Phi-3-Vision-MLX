@@ -4,24 +4,22 @@
 # Licensed under The Apache License 2.0 (https://github.com/vegaluisjose/mlx-rag/blob/main/LICENSE)
 
 import json
-import mlx.core as mx
-import mlx.nn as nn
-
-from pydantic import BaseModel
-from huggingface_hub import snapshot_download
+import os
 from typing import List, Optional
-from transformers import BertTokenizer
 
 import datasets
+import mlx.core as mx
+import mlx.nn as nn
 import numpy as np
-import os
+from huggingface_hub import snapshot_download
+from pydantic import BaseModel
+from transformers import BertTokenizer
 
 PATH_GTE = 'models/gte'
 
 def average_pool(last_hidden_state: mx.array, attention_mask: mx.array) -> mx.array:
     last_hidden = mx.multiply(last_hidden_state, attention_mask[..., None])
     return last_hidden.sum(axis=1) / attention_mask.sum(axis=1)[..., None]
-
 
 class ModelConfig(BaseModel):
     dim: int = 1024
@@ -32,7 +30,6 @@ class ModelConfig(BaseModel):
     hidden_dropout_prob: float = 0.1
     layer_norm_eps: float = 1e-12
     max_position_embeddings: int = 512
-
 
 class TransformerEncoderLayer(nn.Module):
     def __init__(
@@ -62,7 +59,6 @@ class TransformerEncoderLayer(nn.Module):
 
         return x
 
-
 class TransformerEncoder(nn.Module):
     def __init__(
         self, num_layers: int, dims: int, num_heads: int, mlp_dims: Optional[int] = None
@@ -78,7 +74,6 @@ class TransformerEncoder(nn.Module):
             x = layer(x, mask)
 
         return x
-
 
 class BertEmbeddings(nn.Module):
     def __init__(self, config: ModelConfig):
@@ -98,7 +93,6 @@ class BertEmbeddings(nn.Module):
 
         embeddings = position + words + token_types
         return self.norm(embeddings)
-
 
 class Bert(nn.Module):
     def __init__(self, config: ModelConfig):

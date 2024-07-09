@@ -1,11 +1,85 @@
+import json
+import math
+import os
+import re
+import time
+from types import SimpleNamespace
+
+import matplotlib.pyplot as plt
 import mlx.core as mx
 import mlx.nn as nn
-from types import SimpleNamespace
-from transformers import AutoTokenizer
 import numpy as np
-import math
-import re
+from mlx.utils import tree_flatten, tree_unflatten
 from PIL import Image, ImageOps
+from transformers import AutoTokenizer
+
+class Tic:
+    def __init__(self):
+        self.last_time = time.perf_counter()
+
+    def __call__(self):
+        current_time = time.perf_counter()
+        elapsed_time = current_time - self.last_time
+        self.last_time = current_time
+        return elapsed_time
+
+class TrainingCallback:
+    def __init__(self, lora_cfg, lr_schedule, batch_indices, sum_every=3):
+        self.batch_indices = batch_indices
+        self.lora_cfg = lora_cfg
+        self.adapter_path = lora_cfg['adapter_path']
+        self.lr_schedule = lr_schedule
+        self.sum_every = min(sum_every, len(batch_indices))
+        self.current_step = 0
+        self.sum_loss = .0
+        self.best_loss = math.inf
+        self.train_log = {'step_i': [], 'step_loss': [], 'avg_i': [], 'avg_loss': []}
+        self.start_time = time.perf_counter()
+        os.makedirs(self.adapter_path, exist_ok=True)
+
+    def __call__(self, model, lvalue):
+        self.current_step += 1
+        step_loss = lvalue.item()
+        print(f'- Step loss at step {self.current_step}: {step_loss:.2f}')
+        self.train_log['step_i'].append(self.current_step)
+        self.train_log['step_loss'].append(step_loss)
+        self.sum_loss += step_loss
+
+        if self.current_step % self.sum_every == 0:
+            avg_loss = self.sum_loss / self.sum_every
+            self.sum_loss = 0.0
+            self.train_log['avg_i'].append(self.current_step)
+            self.train_log['avg_loss'].append(avg_loss)
+            print(f'Avg loss at step {self.current_step}: {avg_loss:.2f}')
+            if avg_loss < self.best_loss:
+                self.best_loss = avg_loss
+                mx.save_safetensors(f'{self.adapter_path}/adapters.safetensors', dict(tree_flatten(model.trainable_parameters())))
+
+    def end_log(self):
+        train_log = self.train_log
+        train_log['train_time'] = time.perf_counter() - self.start_time
+        with open(f'{self.adapter_path}/adapter_config.json', "w") as f:
+            json.dump(self.lora_cfg, f, indent=4)
+        with open(f'{self.adapter_path}/adapter_train_log.json', "w") as f:
+            json.dump(train_log, f, indent=4)
+        fig, (ax1, ax2, ax3) = plt.subplots(3, 1)
+        ax1.plot(train_log['step_i'], train_log['step_loss'], color='b', alpha=0.5, label='Step Loss')
+        ax1.plot(train_log['avg_i'], train_log['avg_loss'], color='r', label='Avg Loss')
+        ax1.set_title('Training Loss Curves')
+        ax1.legend()
+        ax2.plot(self.lr_schedule)
+        ax2.ticklabel_format(axis='y', style='sci')
+        ax2.set_title('Learning Rate Schedule')
+        batch_indices = np.array(self.batch_indices)
+        batch_numbers = np.arange(len(batch_indices))
+        x = np.repeat(batch_numbers, [len(sublist) for sublist in batch_indices])
+        y = np.concatenate(batch_indices)
+        ax3.scatter(x,y, color='b', marker='.', alpha=0.5)
+        ax3.set_title('Batch Indices')
+        plt.tight_layout()
+        fig.savefig(f'train_log_{self.current_step}_steps_in_{train_log["train_time"]:.0f}_sec.png')
+        print(f"Training log saved to {self.adapter_path}")
+        print(f"Total training time: {train_log['train_time']:.2f} seconds")
 
 class LoRALinear(nn.Module): # https://github.com/ml-explore/mlx-examples/blob/main/llms/mlx_lm/tuner/lora.py
     @staticmethod

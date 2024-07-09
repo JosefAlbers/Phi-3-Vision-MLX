@@ -111,7 +111,7 @@ test_lora(adapter_path=True)
 test_lora(adapter_path="/path/to/your/lora/adapter")
 ```
 
-## 2. Agentic Interactions
+## 2. Agent Interactions
 
 ### Multi-turn Conversation
 
@@ -127,8 +127,7 @@ agent('Analyze this image and describe the architectural style:', 'https://image
 # Second interaction: Follow-up question
 agent('What historical period does this architecture likely belong to?')
 
-# End the conversation
-# This clears the agent's memory and prepares it for a new conversation
+# End the conversation: This clears the agent's memory and prepares it for a new conversation
 agent.end()
 ```
 
