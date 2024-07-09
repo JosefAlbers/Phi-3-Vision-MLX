@@ -41,10 +41,10 @@ benchmark
 
 .. autofunction:: phi_3_vision_mlx.benchmark
 
-chatui
-^^^^^^
+chat_ui
+^^^^^^^
 
-.. autofunction:: phi_3_vision_mlx.chatui
+.. autofunction:: phi_3_vision_mlx.chat_ui
 
 get_api
 ^^^^^^^
