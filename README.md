@@ -56,6 +56,24 @@ generate(prompts, max_tokens=100)
 generate(prompts, max_tokens=100, blind_model=True)
 ```
 
+### Constrained Decoding (WIP)
+
+Example of applying constrained decoding in code generation/function calling.
+
+```python
+from phi_3_vision_mlx import constrain
+
+# Define the prompt that instructs the model on the task to perform.
+prompt = "Write a Python function to calculate the Fibonacci sequence up to a given number n."
+
+# Define constraints to guide the model in generating an appropriate response.
+# Each constraint tuple consists of (num_tokens, constraint_string).
+constraints = [(100, "\n```python\n"), (100, " return "), (100, "\n```")]
+
+# Apply constrained decoding using the 'constrain' function from phi_3_vision_mlx.
+constrain(prompt, constraints)
+```
+
 ### Model and Cache Quantization
 
 ```python

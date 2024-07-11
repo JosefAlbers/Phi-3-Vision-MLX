@@ -555,7 +555,7 @@ class Phi3F(nn.Module):
         self.config = config
         self.num_hidden_layers = config.num_hidden_layers
 
-    def __call__(self, input_ids, pixel_values, image_sizes, positions, cache, pids, mask, max_tokens):
+    def __call__(self, input_ids, pixel_values, image_sizes, positions, cache, pids, mask, max_tokens, advance_offset):
         x = self.embed_tokens(input_ids)
         if pixel_values is not None and self.vision_embed_tokens:
             x = self.vision_embed_tokens(x, pixel_values, image_sizes, positions)
@@ -568,6 +568,10 @@ class Phi3F(nn.Module):
         cos, sin = self.roper(past_L, new_L)
         for i, l in enumerate(self.layers):
             x = l(x, cache[i], cos, sin, mask)
+
+        if advance_offset is not None:
+            for c in cache:
+                c.offset = past_L + advance_offset
         return self.norm(x), cache
 
 class Phi3V(Phi3F):
@@ -582,8 +586,8 @@ class Phi3ForCausalLM(nn.Module):
         self.model = Phi3F(config)
         self.lm_head = nn.Linear(config.hidden_size, config.vocab_size, bias=False)
 
-    def __call__(self, input_ids, pixel_values=None, image_sizes=None, positions=None, cache=None, pids=None, mask=None, max_tokens=0):
-        x, cache = self.model(input_ids, pixel_values, image_sizes, positions, cache, pids, mask, max_tokens)
+    def __call__(self, input_ids, pixel_values=None, image_sizes=None, positions=None, cache=None, pids=None, mask=None, max_tokens=0, advance_offset=None):
+        x, cache = self.model(input_ids, pixel_values, image_sizes, positions, cache, pids, mask, max_tokens, advance_offset)
         return self.lm_head(x), cache
 
     @property

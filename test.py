@@ -80,7 +80,7 @@ class TestPhi3VisionMLX(unittest.TestCase):
             except Exception as e:
                 self.fail(f"test_lora() raised {type(e).__name__} unexpectedly!")
         output = f.getvalue()
-        self.assertIn("Score:", output, "Expected 'Score:' in the output")
+        self.assertIn("Score", output, "Expected 'Score' in the output")
 
     @classmethod
     def tearDownClass(cls):

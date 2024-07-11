@@ -21,9 +21,7 @@ import matplotlib.pyplot as plt
 import mlx.core as mx
 import mlx.nn as nn
 import mlx.optimizers as optim
-import numpy as np
 import requests
-from gradio_client import Client
 from huggingface_hub import snapshot_download
 from mlx.utils import tree_flatten, tree_unflatten
 from PIL import Image
@@ -72,7 +70,7 @@ class Streamer:
             return [txt], len(self.list_tokens)
         else:
             arr_tokens = mx.concatenate(self.list_tokens, axis=1)
-            list_txt = [self.tokenizer.decode(i[:i.index(ID_EOS)+1] if ID_EOS in i else i) for i in arr_tokens.tolist()]
+            list_txt = self.tokenizer.batch_decode([(i[:i.index(ID_EOS)+1] if ID_EOS in i else i) for i in arr_tokens.tolist()])
             if self.mute is False:
                 for i, gen in enumerate(list_txt):
                     print(f'\n< Generated text for prompt #{i} >\n{gen}')
@@ -307,7 +305,7 @@ def _quantize(from_path=PATH_ORIGINAL_PHI3_VISION, to_path=PATH_QUANTIZED_PHI3_V
         json.dump(vars(model_cfg)|{'quantized':quantization_config, 'sanitized':True}, f, indent=4)
     mx.save_safetensors(f'{to_path}/quantized_model.safetensors', quantized_weights)
 
-def _load_image(image_source): # copied from https://github.com/Blaizzy/mlx-vlm/blob/main/mlx_vlm/utils.py
+def _load_image(image_source): # https://github.com/Blaizzy/mlx-vlm/blob/main/mlx_vlm/utils.py
     if isinstance(image_source, BytesIO):
         try:
             return Image.open(image_source)
@@ -343,7 +341,7 @@ def _get_api_output_path(process, file_prefix):
 
 def _apply_chat_template(prompt, images, verbose, apply_chat_template=True):
     if apply_chat_template is False:
-        print(f'### Prompt ###\n{prompt}\n### Images ###\n{images}\n### Output ###') if verbose else None
+        print(f'*** Prompt ***\n{prompt}\n*** Images ***\n{images}\n*** Output ***') if verbose else None
         return prompt, images
     if images is not None:
         images = [_load_image(i) for i in images] if isinstance(images, list) else [_load_image(images)]
@@ -355,7 +353,7 @@ def _apply_chat_template(prompt, images, verbose, apply_chat_template=True):
     if verbose:
         prompt_str = "\n".join(map(str.strip, prompt)).strip()
         images_str = "\n".join(map(str, images)) if images else "None"
-        print(f'### Prompt ###\n{prompt_str}\n### Images ###\n{images_str}\n### Output ###')
+        print(f'*** Prompt ***\n{prompt_str}\n*** Images ***\n{images_str}\n*** Output ***')
     prompt = prompt[0] if len(prompt) == 1 else prompt
     return prompt, images
 
@@ -386,14 +384,14 @@ def _generate(model, processor, prompt, images=None, max_tokens=1000, verbose=Tr
     tic = Tic()
     logits, cache = model(**dict_input, max_tokens=max_tokens)
     token = mx.argmax(logits[:, -1, :], axis=-1)[:,None]
-    mx.eval(token)
+    mx.eval(token, logits, cache)
     streamer(token)
     mask, pids = dict_input.get('mask', None), dict_input.get('pids', None)
     prompt_time = tic()
     for i in range(max_tokens-1):
         logits, cache = model(input_ids=token, cache=cache, mask=mask, pids=pids)
         token = mx.argmax(logits[:, -1, :], axis=-1)[:,None]
-        mx.eval(token)
+        mx.eval(token, logits, cache)
         streamer(token)
         if logit_stopper(logits):
             break
@@ -509,51 +507,79 @@ def _choose_from(model, processor, prompt, choices='ABCDE'):
     indices = mx.argmax(logits[:, options], axis=-1).tolist()
     return [choices[i] for i in indices]
 
+def _preprocess(s):
+    for i in ['<|system|>', '<|user|>', '<|end|>']:
+        s = s.replace(f'{i} ', f'{i}\n').replace(f'{i}\n\n', f'{i}\n')
+    s = s.replace('<|end|><|assistant|>', '<|end|>\n<|assistant|>')
+    return s
+
 def _already(array_2d, array_1d):
+    if array_2d.shape[1] < array_1d.shape[0]:
+        return mx.ones(array_2d.shape[0])
     return ~mx.all(array_2d[:, -len(array_1d):] == array_1d, axis=1)
 
-def _score_iids(scoring_model, iids):
-    logits, _ = scoring_model(iids, max_tokens=0)
-    logits = nn.log_softmax(logits, axis=-1)
-    B, S, V = logits.shape
-    scores = logits[mx.arange(B)[:,None], mx.arange(S-1)[None,:], iids[:,1:]].mean(axis=1)
-    return scores
-
-def _constrain(prompt, constraint=(100, ' The correct answer is')):
-    model, processor = load(blind_model=True, quantize_model=True)
-    scoring_model, _ = load(blind_model=True, quantize_model=True)
-    id_constraint = processor(constraint[1])['input_ids'][0,1:]
-    dict_input = processor(prompt)
-    tokens, mask, pids = dict_input['input_ids'], dict_input.get('mask', None), dict_input.get('pids', None)
-    B, S = tokens.shape
-    id_constraint = mx.tile(id_constraint, (B, 1))
+def _constrain(model, processor, prompt, constraints, return_full_text=False, mute=False):
+    _was_prompt_str = False
     if isinstance(prompt, str):
+        _was_prompt_str = True
         prompt = [prompt]
-    synth_sofar = processor([p+constraint[1] for p in prompt])['input_ids']
-    score_sofar = _score_iids(scoring_model, synth_sofar[:, S:])
-    logits, cache = model(**dict_input, max_tokens=constraint[0])
-    token = mx.argmax(logits[:, -1, :], axis=-1)[:,None]
-    tokens = mx.concatenate([tokens, token], axis=1)
-    synth = mx.concatenate([tokens, id_constraint], axis=1)
-    score = _score_iids(scoring_model, synth[:, S:])
-    score_sofar = mx.where(score > score_sofar, score, score_sofar)
-    synth_pad = mx.tile(mx.array([ID_EOS]), (B, 1))
-    synth_sofar = mx.concatenate([synth_sofar, synth_pad], axis=1)
-    synth_sofar = mx.where(score[:, None] > score_sofar[:, None], synth, synth_sofar)
-    finished_rows = mx.ones(B)
-    for i in range(constraint[0]-1):
-        logits, cache = model(input_ids=token, cache=cache, mask=mask, pids=pids)
+    prompt = [_preprocess(s) for s in prompt]
+    len_ps = [len(p) for p in prompt]
+    for constraint in constraints:
+        constraint_text = constraint[1]
+        id_constraint = mx.array(processor.tokenizer.encode(constraint_text, add_special_tokens=False)[1:])
+        dict_input = processor(prompt)
+        logits, cache = model(**dict_input, max_tokens=constraint[0] + 100)
+        logits = nn.log_softmax(logits, axis=-1)
         token = mx.argmax(logits[:, -1, :], axis=-1)[:,None]
-        tokens = mx.concatenate([tokens, token], axis=1)
-        finished_rows *= _already(tokens, id_constraint[0])
-        if finished_rows.sum() < 1:
-            break
-        synth = mx.concatenate([tokens, id_constraint], axis=1)
-        score = _score_iids(scoring_model, synth[:, S:])
-        synth_sofar = mx.concatenate([synth_sofar, synth_pad], axis=1)
-        synth_sofar = mx.where(score[:, None] > score_sofar[:, None], synth, synth_sofar)
-        score_sofar = mx.where(score > score_sofar, score, score_sofar)
-    return [processor.tokenizer.decode(i[:i.index(ID_EOS,S)]) for i in synth_sofar.tolist()]
+        running_score = mx.max(logits[:, -1, :], axis=-1)[:,None]
+        _score_0 = logits[:, -1, id_constraint[0]]
+        tiled_id_constraint = mx.tile(id_constraint, (token.shape[0], 1))
+        logits_rest, cache = model(input_ids=tiled_id_constraint, cache=cache, mask=dict_input.get('mask', None), pids=dict_input.get('pids', None), advance_offset=0)
+        logits_rest = nn.log_softmax(logits_rest, axis=-1)
+        _score_1 = logits_rest[mx.arange(tiled_id_constraint.shape[0])[:,None], mx.arange(tiled_id_constraint.shape[1]-1)[None,:], tiled_id_constraint[:,1:]]
+        score_sofar = mx.concatenate([_score_0[:,None], _score_1], axis = 1).mean(axis=1)
+        synth_sofar = tiled_id_constraint
+        synth_pad = mx.tile(mx.array([ID_EOS]), (tiled_id_constraint.shape[0], 1))
+        synth = tiled_id_constraint
+        tokens = []
+        finished_rows = mx.ones(tiled_id_constraint.shape[0])
+        for i in range(constraint[0]):
+            tokens.append(token)
+            synth = mx.concatenate(tokens+[tiled_id_constraint], axis=1)
+            token_plus = mx.concatenate([token, tiled_id_constraint], axis=1)
+            logits, cache = model(input_ids=token_plus, cache=cache, mask=dict_input.get('mask', None), pids=dict_input.get('pids', None), advance_offset=1)
+            logits = nn.log_softmax(logits)
+            token = mx.argmax(logits[:, 0, :], axis=-1)
+            finished_rows *= token != ID_EOS
+            token = token[:,None]
+            _synth_score = logits[mx.arange(tiled_id_constraint.shape[0])[:,None], mx.arange(tiled_id_constraint.shape[1])[None,:], tiled_id_constraint]
+            score = mx.concatenate([running_score, _synth_score], axis=1).mean(axis=1)
+            running_score = mx.concatenate([running_score, mx.max(logits[:, 0, :], axis=-1)[:, None]], axis=1)
+            synth_sofar = mx.concatenate([synth_sofar, synth_pad], axis=1)
+            finished_rows *= _already(mx.concatenate(tokens, axis=1), id_constraint)
+            rows_to_update = score > score_sofar
+            rows_to_update *= finished_rows
+            synth_sofar = mx.where(rows_to_update[:,None], synth, synth_sofar)
+            score_sofar = mx.where(rows_to_update, score, score_sofar)
+        output = mx.concatenate([dict_input['input_ids'], synth_sofar], axis=1).tolist()
+        S = dict_input['input_ids'].shape[1]
+        output = [(i[:i.index(ID_EOS,S)] if ID_EOS in i[S:] else i) for i in output]
+        output = [[num for num in sublist if num not in (0,1)] for sublist in output]
+        output = processor.tokenizer.batch_decode(output)
+        output = [_preprocess(s) for s in output]
+        prompt = output
+    if not return_full_text:
+        output = [o[l:] for o,l in zip(output,len_ps)]
+    if not mute:
+        if len(output) == 1:
+            print(output[0])
+        else:
+            for i,o in enumerate(output):
+                print(f'\n< Generated text for prompt #{i} >\n{o}')
+    if _was_prompt_str:
+        output = output[0]
+    return output
 
 def get_api(prompt, n_topk=1, verbose=True):
     """
@@ -600,7 +626,7 @@ def get_api(prompt, n_topk=1, verbose=True):
     codes = vdb([p.split('<|api_input|>')[0] for p in prompt])
     codes = [code.format(prompt=prompt[i].split('<|api_input|>')[1].strip()) for i, sublist in enumerate(codes) for code in sublist]
     if verbose:
-        print('### Obtained api codes ###')
+        print('*** Obtained API Codes ***')
         for code in codes:
             print(code)
     return codes
@@ -902,10 +928,10 @@ def train_lora(model_path=PATH_QUANTIZED_PHI3_BLIND, adapter_path=None, lora_tar
 
 def test_lora(model_path=PATH_QUANTIZED_PHI3_BLIND, adapter_path=True, dataset_path="JosefAlbers/akemiH_MedQA_Reason", take=(0, 10), batch_size=10):
     """
-    Test a LoRA (Low-Rank Adaptation) model on a given dataset.
+    Test a LoRA (Low-Rank Adaptation) model on a given dataset using various generation methods.
 
-    This function loads a model and its LoRA adapter, processes a dataset, and evaluates the model's
-    performance on recall (summarization) and answer generation tasks.
+    This function loads a model and its LoRA adapter (if specified), processes a dataset, and evaluates
+    the model's performance on recall (summarization) and answer generation tasks using different methods.
 
     Parameters:
     -----------
@@ -924,34 +950,40 @@ def test_lora(model_path=PATH_QUANTIZED_PHI3_BLIND, adapter_path=True, dataset_p
     Returns:
     --------
     None
-        The function prints the evaluation results, including generation time, prediction time,
-        and final score, but doesn't return any value.
+        The function prints the evaluation results, including scores for different generation methods,
+        but doesn't return any value.
 
     Notes:
     ------
-    - It performs two tasks: recall of trained texts and generation of answers.
+    - It performs three tasks: recall of trained texts, answer generation using _choose_from(),
+      and answer generation using constrained decoding.
     - For recall, it generates a summary and compares it with the true summary.
-    - For answer generation, it chooses an answer from options A-E and compares with the correct answer.
-    - The function prints comparisons between generated and true responses for the recall task.
-    - After completion, it deletes the model and processor to free up memory.
+    - For answer generation, it uses two methods:
+      1. _choose_from(): Chooses an answer from options A-E.
+      2. Constrained decoding: Generates an answer with specific constraints.
+    - The function prints comparisons between generated and true responses for each task.
+    - After completion, it prints scores for both answer generation methods.
+    - The model and processor are deleted after use to free up memory.
 
     Example:
     --------
     >>> test_lora(model_path="path/to/model", adapter_path="path/to/adapter",
     ...           dataset_path="dataset/path", take=(0, 10), batch_size=10)
     """
-    def _try(example, q_col, q_until, q_format, fxn, a_col, c_col, verbose=True):
+    def _try(example, q_col, q_until, q_format, fxn, a_format, a_col, c_col, verbose=True):
         questions = example[q_col]
         if q_until is not None:
             questions = [i.rsplit(q_until, 1)[0].strip() for i in questions]
         prompts = [f"<|user|>\n{i}<|end|>\n<|assistant|>{q_format}" for i in questions]
         attempts = fxn(prompt=prompts)
+        if a_format is not None:
+            attempts = [i[i.find(a_format)+len(a_format)] for i in attempts]
         example[a_col] = [i.strip() for i in attempts]
         if c_col is not None and verbose is True:
-            print('### Compare ###')
+            print('*** Compare ***')
             for i,j in zip(example[a_col], example[c_col]):
                 print('LoRA:', i)
-                print('True: ', j.strip().split('\n', 1)[0])
+                print('True:', j.strip().split('\n', 1)[0])
                 print('---')
         return example
 
@@ -970,6 +1002,7 @@ def test_lora(model_path=PATH_QUANTIZED_PHI3_BLIND, adapter_path=True, dataset_p
             'q_until':' A: ',
             'q_format':'',
             'fxn':partial(_generate, model=model, processor=processor, max_tokens=30, verbose=False, mute=True),
+            'a_format':None,
             'a_col':'recall',
             'c_col':'summary',
             'verbose':True
@@ -979,15 +1012,28 @@ def test_lora(model_path=PATH_QUANTIZED_PHI3_BLIND, adapter_path=True, dataset_p
             'q_until':None,
             'q_format':'\nThe correct answer is',
             'fxn':partial(_choose_from, model=model, processor=processor, choices='ABCDE'),
+            'a_format':None,
             'a_col':'attempt',
             'c_col':'output',
-            'verbose':False,
+            'verbose':True,
+        },
+        {
+            'q_col':'input',
+            'q_until':None,
+            'q_format':'',
+            'fxn':partial(_constrain, model=model, processor=processor, constraints=[(30, ' The correct answer is'), (10, 'X.')], mute=True),
+            'a_format':'The correct answer is ',
+            'a_col':'constrained_attempt',
+            'c_col':'output',
+            'verbose':True,
         },
     ]
     for i in list_args:
         ds = _map(ds, i)
-    num_recall = len(ds.filter(lambda x: x["output"] == x["attempt"]))
-    print(f'Score: {num_recall/len(ds)}({num_recall}/{len(ds)})')
+    num_chosen = len(ds.filter(lambda x: x["output"] == x["attempt"]))
+    print(f'Score w/ _choose_from(): {num_chosen/len(ds)}({num_chosen}/{len(ds)})')
+    num_constr = len(ds.filter(lambda x: x["output"] == x["constrained_attempt"]))
+    print(f'Score w/ _constrain():   {num_constr/len(ds)}({num_constr}/{len(ds)})')
     del model
     del processor
 
@@ -1180,6 +1226,60 @@ def generate(prompt, images=None, preload=None, blind_model=False, quantize_mode
         preload = load(blind_model=blind_model, quantize_model=quantize_model, quantize_cache=quantize_cache, use_adapter=use_adapter)
     return _generate(*preload, *_apply_chat_template(prompt, images, verbose, apply_chat_template), max_tokens=max_tokens, verbose=verbose, return_tps=return_tps, early_stop=early_stop, stream=stream)
 
+def constrain(prompt, constraints=[(30, ' The correct answer is'), (10, 'X.')], images=None, preload=None, blind_model=False, quantize_model=False, quantize_cache=False, use_adapter=False, apply_chat_template=True):
+    """
+    Perform constrained decoding on the given prompt using specified constraints.
+
+    Parameters:
+    -----------
+    prompt : str or list of str
+        The input prompt(s) for text generation.
+    constraints : list of tuples, optional
+        List of constraints in the format [(max_tokens, constraint_text), ...].
+        Each constraint specifies the maximum number of tokens to generate before the constraint_text
+        must appear. Defaults to [(30, ' The correct answer is'), (10, 'X.')].
+    images : list or None, optional
+        List of image inputs for multimodal models. Defaults to None.
+    preload : tuple, optional
+        A tuple containing (model, processor) if already loaded. If None, the function will load
+        the model and processor based on the provided configuration. Defaults to None.
+    blind_model : bool, optional
+        If True, uses a model without vision capabilities. Defaults to False.
+    quantize_model : bool, optional
+        If True, uses a quantized version of the model. Defaults to False.
+    quantize_cache : bool, optional
+        If True, uses cache quantization. Defaults to False.
+    use_adapter : bool, optional
+        If True, uses a LoRA adapter with the model. Defaults to False.
+    apply_chat_template : bool, optional
+        If True, applies a chat template to the prompt before processing. Defaults to True.
+
+    Returns:
+    --------
+    str or list of str
+        The generated text(s) adhering to the specified constraints. Returns a single string if
+        the input prompt was a string, otherwise returns a list of strings.
+
+    Notes:
+    ------
+    - The function preprocesses the prompt and applies the constraints sequentially.
+    - It uses a custom constrained generation algorithm to ensure the output adheres to the constraints.
+    - The output format matches the input format (str or list of str).
+    - If apply_chat_template is True, the prompt is processed through a chat template before generation.
+
+    Example:
+    --------
+    >>> prompt = "Write a Python function to calculate the Fibonacci sequence up to a given number n."
+    >>> constraints = [(100, "\n```python\n"), (100, " return "), (100, "\n```")]
+    >>> constrain(prompt, constraints)
+    """
+    if preload is None:
+        model, processor = load(blind_model=blind_model, quantize_model=quantize_model, quantize_cache=quantize_cache, use_adapter=use_adapter)
+        preload = model, processor
+    if apply_chat_template:
+        prompt = _apply_chat_template(prompt, None, False)[0]
+    return _constrain(*preload, prompt=prompt, constraints=constraints)
+
 def execute(code_strings, file_prefix=0, verbose=True):
     """
     Execute one or more Python code strings and capture the results.
@@ -1211,7 +1311,7 @@ def execute(code_strings, file_prefix=0, verbose=True):
     code_strings = [code_strings] if isinstance(code_strings, str) else code_strings
     results = [_execute(code_string, f'{file_prefix}_{i}') for i, code_string in enumerate(code_strings)]
     if verbose is True:
-        print('### Execution ###')
+        print('*** Execution ***')
         for result in results:
             for r in result:
                 print(r)
