@@ -1,4 +1,3 @@
-
 Classes
 -------
 
@@ -20,6 +19,11 @@ generate
 ^^^^^^^^
 
 .. autofunction:: phi_3_vision_mlx.generate
+
+constrain
+^^^^^^^^^
+
+.. autofunction:: phi_3_vision_mlx.constrain
 
 execute
 ^^^^^^^

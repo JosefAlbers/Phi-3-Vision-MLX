@@ -254,6 +254,61 @@ if return_tps is True.</p>
 </dd></dl>
 
 </section>
+<section id="constrain">
+<h2>constrain<a class="headerlink" href="#constrain" title="Link to this heading">¶</a></h2>
+<dl class="py function">
+<dt class="sig sig-object py" id="phi_3_vision_mlx.constrain">
+<span class="sig-prename descclassname"><span class="pre">phi_3_vision_mlx.</span></span><span class="sig-name descname"><span class="pre">constrain</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">prompt</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">constraints</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">[(30,</span> <span class="pre">'</span> <span class="pre">The</span> <span class="pre">correct</span> <span class="pre">answer</span> <span class="pre">is'),</span> <span class="pre">(10,</span> <span class="pre">'X.')]</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">images</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">preload</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">blind_model</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">False</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">quantize_model</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">False</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">quantize_cache</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">False</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">use_adapter</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">False</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">apply_chat_template</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">True</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#phi_3_vision_mlx.constrain" title="Link to this definition">¶</a></dt>
+<dd><blockquote>
+<div><p>Perform constrained decoding on the given prompt using specified constraints.</p>
+<dl class="simple">
+<dt>prompt<span class="classifier">str or list of str</span></dt><dd><p>The input prompt(s) for text generation.</p>
+</dd>
+<dt>constraints<span class="classifier">list of tuples, optional</span></dt><dd><p>List of constraints in the format [(max_tokens, constraint_text), …].
+Each constraint specifies the maximum number of tokens to generate before the constraint_text
+must appear. Defaults to [(30, ‘ The correct answer is’), (10, ‘X.’)].</p>
+</dd>
+<dt>images<span class="classifier">list or None, optional</span></dt><dd><p>List of image inputs for multimodal models. Defaults to None.</p>
+</dd>
+<dt>preload<span class="classifier">tuple, optional</span></dt><dd><p>A tuple containing (model, processor) if already loaded. If None, the function will load
+the model and processor based on the provided configuration. Defaults to None.</p>
+</dd>
+<dt>blind_model<span class="classifier">bool, optional</span></dt><dd><p>If True, uses a model without vision capabilities. Defaults to False.</p>
+</dd>
+<dt>quantize_model<span class="classifier">bool, optional</span></dt><dd><p>If True, uses a quantized version of the model. Defaults to False.</p>
+</dd>
+<dt>quantize_cache<span class="classifier">bool, optional</span></dt><dd><p>If True, uses cache quantization. Defaults to False.</p>
+</dd>
+<dt>use_adapter<span class="classifier">bool, optional</span></dt><dd><p>If True, uses a LoRA adapter with the model. Defaults to False.</p>
+</dd>
+<dt>apply_chat_template<span class="classifier">bool, optional</span></dt><dd><p>If True, applies a chat template to the prompt before processing. Defaults to True.</p>
+</dd>
+</dl>
+<dl class="simple">
+<dt>str or list of str</dt><dd><p>The generated text(s) adhering to the specified constraints. Returns a single string if
+the input prompt was a string, otherwise returns a list of strings.</p>
+</dd>
+</dl>
+<ul class="simple">
+<li><p>The function preprocesses the prompt and applies the constraints sequentially.</p></li>
+<li><p>It uses a custom constrained generation algorithm to ensure the output adheres to the constraints.</p></li>
+<li><p>The output format matches the input format (str or list of str).</p></li>
+<li><p>If apply_chat_template is True, the prompt is processed through a chat template before generation.</p></li>
+</ul>
+<div class="doctest highlight-default notranslate"><div class="highlight"><pre><span></span><span class="gp">&gt;&gt;&gt; </span><span class="n">prompt</span> <span class="o">=</span> <span class="s2">&quot;Write a Python function to calculate the Fibonacci sequence up to a given number n.&quot;</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">constraints</span> <span class="o">=</span> <span class="p">[(</span><span class="mi">100</span><span class="p">,</span> <span class="s2">&quot;</span>
+</pre></div>
+</div>
+</div></blockquote>
+<p><code class="docutils literal notranslate"><span class="pre">`python</span>
+<span class="pre">&quot;),</span> <span class="pre">(100,</span> <span class="pre">&quot;</span> <span class="pre">return</span> <span class="pre">&quot;),</span> <span class="pre">(100,</span> <span class="pre">&quot;</span>
+<span class="pre">`</span></code>”)]</p>
+<div class="doctest highlight-default notranslate"><div class="highlight"><pre><span></span><span class="gp">&gt;&gt;&gt; </span><span class="n">constrain</span><span class="p">(</span><span class="n">prompt</span><span class="p">,</span> <span class="n">constraints</span><span class="p">)</span>
+</pre></div>
+</div>
+</dd></dl>
+
+</section>
 <section id="execute">
 <h2>execute<a class="headerlink" href="#execute" title="Link to this heading">¶</a></h2>
 <dl class="py function">
@@ -362,9 +417,9 @@ Defaults to None.</p>
 <dl class="py function">
 <dt class="sig sig-object py" id="phi_3_vision_mlx.test_lora">
 <span class="sig-prename descclassname"><span class="pre">phi_3_vision_mlx.</span></span><span class="sig-name descname"><span class="pre">test_lora</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">model_path</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">'models/phi3_mini_128k_Q'</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">adapter_path</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">True</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">dataset_path</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">'JosefAlbers/akemiH_MedQA_Reason'</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">take</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">(0,</span> <span class="pre">10)</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">batch_size</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">10</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#phi_3_vision_mlx.test_lora" title="Link to this definition">¶</a></dt>
-<dd><p>Test a LoRA (Low-Rank Adaptation) model on a given dataset.</p>
-<p>This function loads a model and its LoRA adapter, processes a dataset, and evaluates the model’s
-performance on recall (summarization) and answer generation tasks.</p>
+<dd><p>Test a LoRA (Low-Rank Adaptation) model on a given dataset using various generation methods.</p>
+<p>This function loads a model and its LoRA adapter (if specified), processes a dataset, and evaluates
+the model’s performance on recall (summarization) and answer generation tasks using different methods.</p>
 <section id="id16">
 <h3>Parameters:<a class="headerlink" href="#id16" title="Link to this heading">¶</a></h3>
 <dl class="simple">
@@ -384,19 +439,23 @@ If None, the model without adapter is tested. Defaults to True.</p>
 <section id="id17">
 <h3>Returns:<a class="headerlink" href="#id17" title="Link to this heading">¶</a></h3>
 <dl class="simple">
-<dt>None</dt><dd><p>The function prints the evaluation results, including generation time, prediction time,
-and final score, but doesn’t return any value.</p>
+<dt>None</dt><dd><p>The function prints the evaluation results, including scores for different generation methods,
+but doesn’t return any value.</p>
 </dd>
 </dl>
 </section>
 <section id="id18">
 <h3>Notes:<a class="headerlink" href="#id18" title="Link to this heading">¶</a></h3>
 <ul class="simple">
-<li><p>It performs two tasks: recall of trained texts and generation of answers.</p></li>
+<li><p>It performs three tasks: recall of trained texts, answer generation using _choose_from(),
+and answer generation using constrained decoding.</p></li>
 <li><p>For recall, it generates a summary and compares it with the true summary.</p></li>
-<li><p>For answer generation, it chooses an answer from options A-E and compares with the correct answer.</p></li>
-<li><p>The function prints comparisons between generated and true responses for the recall task.</p></li>
-<li><p>After completion, it deletes the model and processor to free up memory.</p></li>
+<li><p>For answer generation, it uses two methods:
+1. _choose_from(): Chooses an answer from options A-E.
+2. Constrained decoding: Generates an answer with specific constraints.</p></li>
+<li><p>The function prints comparisons between generated and true responses for each task.</p></li>
+<li><p>After completion, it prints scores for both answer generation methods.</p></li>
+<li><p>The model and processor are deleted after use to free up memory.</p></li>
 </ul>
 </section>
 <section id="id19">

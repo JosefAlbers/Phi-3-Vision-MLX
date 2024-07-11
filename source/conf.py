@@ -21,6 +21,12 @@ autodoc_default_options = {
     'special-members': None,
 }
 
+# napoleon_use_rtype = False  # Ensure this is set to False to handle Markdown-style code blocks
+napoleon_google_docstring = True
+napoleon_numpy_docstring = False
+napoleon_use_param = False
+napoleon_use_ivar = False
+
 # -- Options for HTML output -------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#options-for-html-output
 
