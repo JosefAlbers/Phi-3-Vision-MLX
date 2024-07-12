@@ -27,6 +27,23 @@ Batch Text Generation
     # Generate responses using Phi-3-Mini-128K (language-only model)
     generate(prompts, max_tokens=100, blind_model=True)
 
+Structured Generation Using Constrained Decoding
+------------------------------------------------
+
+.. code-block:: python
+
+    from phi_3_vision_mlx import constrain
+
+    # Define the prompt that instructs the model on the task to perform.
+    prompt = "Write a Python function to calculate the Fibonacci sequence up to a given number n."
+
+    # Define constraints to guide the model in generating an appropriate response.
+    # Each constraint tuple consists of (num_tokens, constraint_string).
+    constraints = [(100, "\n```python\n"), (100, " return "), (200, "\n```")]
+
+    # Apply constrained decoding using the 'constrain' function from phi_3_vision_mlx.
+    constrain(prompt, constraints)
+
 Model and Cache Quantization
 ----------------------------
 

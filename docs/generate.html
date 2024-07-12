@@ -51,6 +51,7 @@
 <li class="toctree-l1 current"><a class="current reference internal" href="#">Text Generation</a><ul>
 <li class="toctree-l2"><a class="reference internal" href="#visual-question-answering">Visual Question Answering</a></li>
 <li class="toctree-l2"><a class="reference internal" href="#batch-text-generation">Batch Text Generation</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#structured-generation-using-constrained-decoding">Structured Generation Using Constrained Decoding</a></li>
 <li class="toctree-l2"><a class="reference internal" href="#model-and-cache-quantization">Model and Cache Quantization</a></li>
 </ul>
 </li>
@@ -122,6 +123,22 @@
 
 <span class="c1"># Generate responses using Phi-3-Mini-128K (language-only model)</span>
 <span class="n">generate</span><span class="p">(</span><span class="n">prompts</span><span class="p">,</span> <span class="n">max_tokens</span><span class="o">=</span><span class="mi">100</span><span class="p">,</span> <span class="n">blind_model</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+</pre></div>
+</div>
+</section>
+<section id="structured-generation-using-constrained-decoding">
+<h2>Structured Generation Using Constrained Decoding<a class="headerlink" href="#structured-generation-using-constrained-decoding" title="Link to this heading">¶</a></h2>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span> <span class="nn">phi_3_vision_mlx</span> <span class="kn">import</span> <span class="n">constrain</span>
+
+<span class="c1"># Define the prompt that instructs the model on the task to perform.</span>
+<span class="n">prompt</span> <span class="o">=</span> <span class="s2">&quot;Write a Python function to calculate the Fibonacci sequence up to a given number n.&quot;</span>
+
+<span class="c1"># Define constraints to guide the model in generating an appropriate response.</span>
+<span class="c1"># Each constraint tuple consists of (num_tokens, constraint_string).</span>
+<span class="n">constraints</span> <span class="o">=</span> <span class="p">[(</span><span class="mi">100</span><span class="p">,</span> <span class="s2">&quot;</span><span class="se">\n</span><span class="s2">```python</span><span class="se">\n</span><span class="s2">&quot;</span><span class="p">),</span> <span class="p">(</span><span class="mi">100</span><span class="p">,</span> <span class="s2">&quot; return &quot;</span><span class="p">),</span> <span class="p">(</span><span class="mi">200</span><span class="p">,</span> <span class="s2">&quot;</span><span class="se">\n</span><span class="s2">```&quot;</span><span class="p">)]</span>
+
+<span class="c1"># Apply constrained decoding using the &#39;constrain&#39; function from phi_3_vision_mlx.</span>
+<span class="n">constrain</span><span class="p">(</span><span class="n">prompt</span><span class="p">,</span> <span class="n">constraints</span><span class="p">)</span>
 </pre></div>
 </div>
 </section>
