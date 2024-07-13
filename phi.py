@@ -507,10 +507,16 @@ class KVCache:
             self.kv = None
         else:
             self.kv = mx.zeros(shape, mx.float32)
+        self.n_beam = None
 
     def __call__(self, keys, values):
         if self.max_tokens < 1:
             return keys, values
+        if self.n_beam:
+            if self.use_quantized_cache:
+                raise NotImplementedError('Beam Search is not yet compatible with Quantized Cache')
+            kv = mx.repeat(self.kv[:,:,:,:self.offset,:], repeats=self.n_beam, axis=1)
+            return mx.concatenate([kv[0], keys], axis=-2), mx.concatenate([kv[1], values], axis=-2)
         B, N, L, D = keys.shape
         new_offset = self.offset + L
         if self.use_quantized_cache:
@@ -527,6 +533,9 @@ class KVCache:
             self.kv[1,:,:,self.offset:new_offset,:] = values
             self.offset = new_offset
             return self.kv[0,:,:,:new_offset,:], self.kv[1,:,:,:new_offset,:]
+
+    def beam(self, n_beam):
+        self.n_beam = n_beam
 
 class Mask4D:
     def __init__(self, L_all, mask):
@@ -555,7 +564,7 @@ class Phi3F(nn.Module):
         self.config = config
         self.num_hidden_layers = config.num_hidden_layers
 
-    def __call__(self, input_ids, pixel_values, image_sizes, positions, cache, pids, mask, max_tokens, advance_offset):
+    def __call__(self, input_ids, pixel_values, image_sizes, positions, cache, pids, mask, max_tokens, advance_offset, n_beam):
         x = self.embed_tokens(input_ids)
         if pixel_values is not None and self.vision_embed_tokens:
             x = self.vision_embed_tokens(x, pixel_values, image_sizes, positions)
@@ -566,9 +575,16 @@ class Phi3F(nn.Module):
         past_L, new_L = cache[0].offset, x.shape[1]
         mask = self.masker(past_L, new_L)
         cos, sin = self.roper(past_L, new_L)
+        if n_beam is not None:
+            mask = mx.repeat(mask, repeats=n_beam, axis=0)
+            cos = mx.repeat(cos, repeats=n_beam, axis=0)
+            sin = mx.repeat(sin, repeats=n_beam, axis=0)
+            [c.beam(n_beam) for c in cache]
         for i, l in enumerate(self.layers):
             x = l(x, cache[i], cos, sin, mask)
 
+        if n_beam is not None:
+            [c.beam(None) for c in cache]
         if advance_offset is not None:
             for c in cache:
                 c.offset = past_L + advance_offset
@@ -586,8 +602,8 @@ class Phi3ForCausalLM(nn.Module):
         self.model = Phi3F(config)
         self.lm_head = nn.Linear(config.hidden_size, config.vocab_size, bias=False)
 
-    def __call__(self, input_ids, pixel_values=None, image_sizes=None, positions=None, cache=None, pids=None, mask=None, max_tokens=0, advance_offset=None):
-        x, cache = self.model(input_ids, pixel_values, image_sizes, positions, cache, pids, mask, max_tokens, advance_offset)
+    def __call__(self, input_ids, pixel_values=None, image_sizes=None, positions=None, cache=None, pids=None, mask=None, max_tokens=0, advance_offset=None, n_beam=None):
+        x, cache = self.model(input_ids, pixel_values, image_sizes, positions, cache, pids, mask, max_tokens, advance_offset, n_beam)
         return self.lm_head(x), cache
 
     @property

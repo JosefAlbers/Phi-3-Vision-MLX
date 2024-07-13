@@ -8,7 +8,7 @@ setup(
     url='https://github.com/JosefAlbers/Phi-3-Vision-MLX',
     py_modules=['phi_3_vision_mlx', 'gte', 'phi', 'api'],
     packages=find_packages(),
-    version='0.0.9-alpha',
+    version='0.0.9-beta',
     readme="README.md",
     author_email="albersj66@gmail.com",
     description="Phi-3-Vision on Apple silicon with MLX",

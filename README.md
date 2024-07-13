@@ -56,24 +56,6 @@ generate(prompts, max_tokens=100)
 generate(prompts, max_tokens=100, blind_model=True)
 ```
 
-### Constrained Decoding (WIP)
-
-Example of applying constrained decoding in code generation/function calling.
-
-```python
-from phi_3_vision_mlx import constrain
-
-# Define the prompt that instructs the model on the task to perform.
-prompt = "Write a Python function to calculate the Fibonacci sequence up to a given number n."
-
-# Define constraints to guide the model in generating an appropriate response.
-# Each constraint tuple consists of (num_tokens, constraint_string).
-constraints = [(100, "\n```python\n"), (100, " return "), (100, "\n```")]
-
-# Apply constrained decoding using the 'constrain' function from phi_3_vision_mlx.
-constrain(prompt, constraints)
-```
-
 ### Model and Cache Quantization
 
 ```python
@@ -84,9 +66,50 @@ generate("Describe the water cycle.", quantize_model=True)
 generate("Explain quantum computing.", quantize_cache=True)
 ```
 
-### LoRA Fine-tuning
+### Structured Generation Using Constrained Decoding (WIP)
 
-Training a LoRA Adapter
+The `constrain` function allows for structured generation, which can be useful for tasks like code generation, function calling, chain-of-thought prompting, or multiple-choice question answering.
+
+```python
+from phi_3_vision_mlx import constrain
+
+# Define the prompt
+prompt = "Write a Python function to calculate the Fibonacci sequence up to a given number n."
+
+# Define constraints
+constraints = [
+    (100, "\n```python\n"), # Start of code block
+    (100, " return "),      # Ensure a return statement
+    (200, "\n```")],        # End of code block
+
+# Apply constrained decoding using the 'constrain' function from phi_3_vision_mlx.
+constrain(prompt, constraints)
+```
+
+The `constrain` function can also guide the model to provide reasoning before concluding with an answer. This approach can be especially helpful for multiple-choice questions, such as those in the Massive Multitask Language Understanding (MMLU) benchmark, where the model's thought process is as crucial as its final selection.
+
+```python
+prompts = [
+    "A 20-year-old woman presents with menorrhagia for the past several years. She says that her menses “have always been heavy”, and she has experienced easy bruising for as long as she can remember. Family history is significant for her mother, who had similar problems with bruising easily. The patient's vital signs include: heart rate 98/min, respiratory rate 14/min, temperature 36.1°C (96.9°F), and blood pressure 110/87 mm Hg. Physical examination is unremarkable. Laboratory tests show the following: platelet count 200,000/mm3, PT 12 seconds, and PTT 43 seconds. Which of the following is the most likely cause of this patient’s symptoms? A: Factor V Leiden B: Hemophilia A C: Lupus anticoagulant D: Protein C deficiency E: Von Willebrand disease",
+    "A 25-year-old primigravida presents to her physician for a routine prenatal visit. She is at 34 weeks gestation, as confirmed by an ultrasound examination. She has no complaints, but notes that the new shoes she bought 2 weeks ago do not fit anymore. The course of her pregnancy has been uneventful and she has been compliant with the recommended prenatal care. Her medical history is unremarkable. She has a 15-pound weight gain since the last visit 3 weeks ago. Her vital signs are as follows: blood pressure, 148/90 mm Hg; heart rate, 88/min; respiratory rate, 16/min; and temperature, 36.6℃ (97.9℉). The blood pressure on repeat assessment 4 hours later is 151/90 mm Hg. The fetal heart rate is 151/min. The physical examination is significant for 2+ pitting edema of the lower extremity. Which of the following tests o should confirm the probable condition of this patient? A: Bilirubin assessment B: Coagulation studies C: Hematocrit assessment D: Leukocyte count with differential E: 24-hour urine protein"]
+
+constrain(prompts, constraints=[(30, ' The correct answer is'), (10, 'X.')], blind_model=True, quantize_model=True)
+```
+
+The constraints encourage a structured response that includes the thought process, making the output more informative and transparent:
+
+```
+< Generated text for prompt #0 >
+The most likely cause of this patient's menorrhagia and easy bruising is E: Von Willebrand disease. The correct answer is Von Willebrand disease.
+
+< Generated text for prompt #1 >
+The patient's hypertension, edema, and weight gain are concerning for preeclampsia. The correct answer is E: 24-hour urine protein.
+(phi) phi %
+```
+
+### (Q)LoRA Fine-tuning
+
+Training a (Q)LoRA Adapter
 
 ```python
 from phi_3_vision_mlx import train_lora
@@ -103,7 +126,7 @@ train_lora(
 
 ![Alt text](https://raw.githubusercontent.com/JosefAlbers/Phi-3-Vision-MLX/main/assets/train_log.png)
 
-Generating Text with LoRA
+Generating Text with (Q)LoRA
 
 ```python
 generate("Describe the potential applications of CRISPR gene editing in medicine.",
@@ -112,7 +135,7 @@ generate("Describe the potential applications of CRISPR gene editing in medicine
     use_adapter=True)
 ```
 
-Comparing LoRA Adapters
+Comparing (Q)LoRA Adapters
 
 ```python
 from phi_3_vision_mlx import test_lora

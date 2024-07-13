@@ -252,8 +252,6 @@ def _setup():
         raw = snapshot_download(repo_id=hub, allow_patterns=["*.safetensors", "*.json"])
         _sanitize(from_path=raw, to_path=local)
         _quantize(from_path=raw, to_path=quant)
-        train_lora(model_path=local, take=1)
-        train_lora(model_path=quant, take=1)
 
 def _load(model_path=PATH_ORIGINAL_PHI3_VISION, adapter_path=None, return_mx=True, **kwargs):
     model_cfg = _get_cfg(f"{model_path}/config.json", **kwargs)
@@ -349,7 +347,7 @@ def _apply_chat_template(prompt, images, verbose, apply_chat_template=True):
     else:
         img_prompt = ''
     prompt = [prompt] if isinstance(prompt, str) else prompt
-    prompt = [f"<|user|>\n{img_prompt}{i}<|end|>\n<|assistant|>\n" for i in prompt]
+    prompt = [f"<|user|>\n{img_prompt}{i.strip()}<|end|>\n<|assistant|>\n" for i in prompt]
     if verbose:
         prompt_str = "\n".join(map(str.strip, prompt)).strip()
         images_str = "\n".join(map(str, images)) if images else "None"
@@ -529,7 +527,7 @@ def _constrain(model, processor, prompt, constraints, return_full_text=False, mu
         constraint_text = constraint[1]
         id_constraint = mx.array(processor.tokenizer.encode(constraint_text, add_special_tokens=False)[1:])
         dict_input = processor(prompt)
-        logits, cache = model(**dict_input, max_tokens=constraint[0] + 100)
+        logits, cache = model(**dict_input, max_tokens=constraint[0] + id_constraint.shape[0]+10)
         logits = nn.log_softmax(logits, axis=-1)
         token = mx.argmax(logits[:, -1, :], axis=-1)[:,None]
         running_score = mx.max(logits[:, -1, :], axis=-1)[:,None]
@@ -558,6 +556,86 @@ def _constrain(model, processor, prompt, constraints, return_full_text=False, mu
             running_score = mx.concatenate([running_score, mx.max(logits[:, 0, :], axis=-1)[:, None]], axis=1)
             synth_sofar = mx.concatenate([synth_sofar, synth_pad], axis=1)
             finished_rows *= _already(mx.concatenate(tokens, axis=1), id_constraint)
+            if finished_rows.sum() < 1:
+                break
+            rows_to_update = score > score_sofar
+            rows_to_update *= finished_rows
+            synth_sofar = mx.where(rows_to_update[:,None], synth, synth_sofar)
+            score_sofar = mx.where(rows_to_update, score, score_sofar)
+        output = mx.concatenate([dict_input['input_ids'], synth_sofar], axis=1).tolist()
+        S = dict_input['input_ids'].shape[1]
+        output = [(i[:i.index(ID_EOS,S)] if ID_EOS in i[S:] else i) for i in output]
+        output = [[num for num in sublist if num not in (0,1)] for sublist in output]
+        output = processor.tokenizer.batch_decode(output)
+        output = [_preprocess(s) for s in output]
+        prompt = output
+    if not return_full_text:
+        output = [o[l:] for o,l in zip(output,len_ps)]
+    if not mute:
+        if len(output) == 1:
+            print(output[0])
+        else:
+            for i,o in enumerate(output):
+                print(f'\n< Generated text for prompt #{i} >\n{o}')
+    if _was_prompt_str:
+        output = output[0]
+    return output
+
+def _beam(model, processor, prompt, constraints, return_full_text=False, mute=False):
+    def _get_beam(logits, cache, id_constraint, beam_idx=0, n_beam=3):
+        _B, _S, _V = logits.shape
+        _arg_beam = mx.argpartition(-logits[:, beam_idx, :], kth=n_beam, axis=-1)[:,:n_beam]
+        _beam = _arg_beam.reshape(-1)[:,None]
+        _beam = mx.concatenate([_beam, mx.tile(id_constraint, (_beam.shape[0], 1))], axis=-1)
+        _beam_logits, cache = model(input_ids=_beam, cache=cache, n_beam=n_beam)
+        _beam_logits = nn.log_softmax(_beam_logits)
+        _beam_score = _beam_logits[mx.arange(_beam_logits.shape[0])[:,None], mx.arange(_beam.shape[1]-1)[None,:], _beam[:,1:]]
+        _beam_score = mx.concatenate([logits[mx.arange(_arg_beam.shape[0])[:,None],beam_idx,_arg_beam].reshape(-1)[:,None], _beam_score], axis=1).mean(axis=1)
+        _beam_score = _beam_score.reshape(-1,n_beam)
+        _argmax_beam = mx.argmax(_beam_score, axis=-1)
+        token = _arg_beam[mx.arange(len(_argmax_beam)), _argmax_beam]
+        return token, cache
+    _was_prompt_str = False
+    if isinstance(prompt, str):
+        _was_prompt_str = True
+        prompt = [prompt]
+    prompt = [_preprocess(s) for s in prompt]
+    len_ps = [len(p) for p in prompt]
+    for constraint in constraints:
+        constraint_text = constraint[1]
+        id_constraint = mx.array(processor.tokenizer.encode(constraint_text, add_special_tokens=False)[1:])
+        dict_input = processor(prompt)
+        logits, cache = model(**dict_input, max_tokens=constraint[0] + id_constraint.shape[0]+10)
+        logits = nn.log_softmax(logits, axis=-1)
+        token = mx.argmax(logits[:, -1, :], axis=-1)[:,None]
+        running_score = mx.max(logits[:, -1, :], axis=-1)[:,None]
+        _score_0 = logits[:, -1, id_constraint[0]]
+        tiled_id_constraint = mx.tile(id_constraint, (token.shape[0], 1))
+        logits_rest, cache = model(input_ids=tiled_id_constraint, cache=cache, advance_offset=0)
+        logits_rest = nn.log_softmax(logits_rest, axis=-1)
+        _score_1 = logits_rest[mx.arange(tiled_id_constraint.shape[0])[:,None], mx.arange(tiled_id_constraint.shape[1]-1)[None,:], tiled_id_constraint[:,1:]]
+        score_sofar = mx.concatenate([_score_0[:,None], _score_1], axis = 1).mean(axis=1)
+        synth_sofar = tiled_id_constraint
+        synth_pad = mx.tile(mx.array([ID_EOS]), (tiled_id_constraint.shape[0], 1))
+        synth = tiled_id_constraint
+        tokens = []
+        finished_rows = mx.ones(tiled_id_constraint.shape[0])
+        for i in range(constraint[0]):
+            tokens.append(token)
+            synth = mx.concatenate(tokens+[tiled_id_constraint], axis=1)
+            token_plus = mx.concatenate([token, tiled_id_constraint], axis=1)
+            logits, cache = model(input_ids=token_plus, cache=cache, advance_offset=1)
+            logits = nn.log_softmax(logits)
+            token, cache = _get_beam(logits, cache, id_constraint)
+            finished_rows *= token != ID_EOS
+            _synth_score = logits[mx.arange(tiled_id_constraint.shape[0])[:,None], mx.arange(tiled_id_constraint.shape[1])[None,:], tiled_id_constraint]
+            score = mx.concatenate([running_score, _synth_score], axis=1).mean(axis=1)
+            running_score = mx.concatenate([running_score, logits[mx.arange(token.shape[0]),0,token][:,None]], axis=1)
+            token = token[:,None]
+            synth_sofar = mx.concatenate([synth_sofar, synth_pad], axis=1)
+            finished_rows *= _already(mx.concatenate(tokens, axis=1), id_constraint)
+            if finished_rows.sum() < 1:
+                break
             rows_to_update = score > score_sofar
             rows_to_update *= finished_rows
             synth_sofar = mx.where(rows_to_update[:,None], synth, synth_sofar)
@@ -936,33 +1014,34 @@ def test_lora(model_path=PATH_QUANTIZED_PHI3_BLIND, adapter_path=True, dataset_p
     Parameters:
     -----------
     model_path : str, optional
-        Path to the base model. Defaults to PATH_QUANTIZED_PHI3_BLIND.
+        Path to the base model. Default is PATH_QUANTIZED_PHI3_BLIND.
     adapter_path : bool or str, optional
         Path to the LoRA adapter. If True, it's set to '{PATH_ADAPTERS}/{model_path}'.
-        If None, the model without adapter is tested. Defaults to True.
+        If None, the model without adapter is tested. Default is True.
     dataset_path : str, optional
-        Path to the dataset to be used for testing. Defaults to "JosefAlbers/akemiH_MedQA_Reason".
-    take : tuple of int, optional
-        Range of samples to take from the dataset, in the format (start, end). Defaults to (0, 10).
+        Path to the dataset to be used for testing. Default is "JosefAlbers/akemiH_MedQA_Reason".
+    take : tuple of int or int, optional
+        Range of samples to take from the dataset. If tuple, in the format (start, end).
+        If int, takes (0, take) samples. Default is (0, 10).
     batch_size : int, optional
-        Number of samples to process in each batch. Defaults to 10.
+        Number of samples to process in each batch. Default is 10.
 
     Returns:
     --------
     None
-        The function prints the evaluation results, including scores for different generation methods,
-        but doesn't return any value.
+        The function prints the evaluation results but doesn't return any value.
 
     Notes:
     ------
-    - It performs three tasks: recall of trained texts, answer generation using _choose_from(),
+    - Performs three tasks: recall of trained texts, answer generation using _choose_from(),
       and answer generation using constrained decoding.
     - For recall, it generates a summary and compares it with the true summary.
-    - For answer generation, it uses two methods:
+    - For answer generation, it uses three methods:
       1. _choose_from(): Chooses an answer from options A-E.
-      2. Constrained decoding: Generates an answer with specific constraints.
-    - The function prints comparisons between generated and true responses for each task.
-    - After completion, it prints scores for both answer generation methods.
+      2. _constrain(): Generates an answer with specific constraints.
+      3. _beam(): Generates an answer using beam search with constraints.
+    - Prints comparisons between generated and true responses for each task.
+    - After completion, prints scores for all answer generation methods.
     - The model and processor are deleted after use to free up memory.
 
     Example:
@@ -974,16 +1053,22 @@ def test_lora(model_path=PATH_QUANTIZED_PHI3_BLIND, adapter_path=True, dataset_p
         questions = example[q_col]
         if q_until is not None:
             questions = [i.rsplit(q_until, 1)[0].strip() for i in questions]
+        q_format = q_format if q_format else ''
         prompts = [f"<|user|>\n{i}<|end|>\n<|assistant|>{q_format}" for i in questions]
         attempts = fxn(prompt=prompts)
-        if a_format is not None:
-            attempts = [i[i.find(a_format)+len(a_format)] for i in attempts]
-        example[a_col] = [i.strip() for i in attempts]
+        if a_format:
+            answers = [i[i.find(a_format)+len(a_format)].strip() for i in attempts]
+        else:
+            answers = attempts
+        example[a_col] = answers
         if c_col is not None and verbose is True:
-            print('*** Compare ***')
-            for i,j in zip(example[a_col], example[c_col]):
-                print('LoRA:', i)
-                print('True:', j.strip().split('\n', 1)[0])
+            print(f'*** COMPARE ***')
+            for i,j,k,l in zip(questions, attempts, answers, example[c_col]):
+                print('- PROMPT:', i)
+                print('- OUTPUT:', j)
+                if a_format:
+                    print('- ANSWER:', k)
+                print('-  TRUTH:', l.strip().split('\n', 1)[0])
                 print('---')
         return example
 
@@ -1000,7 +1085,7 @@ def test_lora(model_path=PATH_QUANTIZED_PHI3_BLIND, adapter_path=True, dataset_p
         {
             'q_col':'input',
             'q_until':' A: ',
-            'q_format':'',
+            'q_format':None,
             'fxn':partial(_generate, model=model, processor=processor, max_tokens=30, verbose=False, mute=True),
             'a_format':None,
             'a_col':'recall',
@@ -1027,6 +1112,16 @@ def test_lora(model_path=PATH_QUANTIZED_PHI3_BLIND, adapter_path=True, dataset_p
             'c_col':'output',
             'verbose':True,
         },
+        {
+            'q_col':'input',
+            'q_until':None,
+            'q_format':'',
+            'fxn':partial(_beam, model=model, processor=processor, constraints=[(30, ' The correct answer is'), (10, 'X.')], mute=True),
+            'a_format':'The correct answer is ',
+            'a_col':'beamed_attempt',
+            'c_col':'output',
+            'verbose':True,
+        },
     ]
     for i in list_args:
         ds = _map(ds, i)
@@ -1034,6 +1129,8 @@ def test_lora(model_path=PATH_QUANTIZED_PHI3_BLIND, adapter_path=True, dataset_p
     print(f'Score w/ _choose_from(): {num_chosen/len(ds)}({num_chosen}/{len(ds)})')
     num_constr = len(ds.filter(lambda x: x["output"] == x["constrained_attempt"]))
     print(f'Score w/ _constrain():   {num_constr/len(ds)}({num_constr}/{len(ds)})')
+    num_beamed = len(ds.filter(lambda x: x["output"] == x["beamed_attempt"]))
+    print(f'Score w/ _beam():        {num_beamed/len(ds)}({num_beamed}/{len(ds)})')
     del model
     del processor
 
@@ -1108,6 +1205,13 @@ def benchmark(blind_model=False, json_path='benchmark.json'):
             "Implement a basic encryption algorithm in Python.",
         ], None),
     ]
+    for i in [
+        PATH_ORIGINAL_PHI3_VISION,
+        PATH_QUANTIZED_PHI3_VISION,
+        PATH_ORIGINAL_PHI3_BLIND,
+        PATH_QUANTIZED_PHI3_BLIND
+    ]:
+        train_lora(model_path=i, take=1)
     results = {
         'vanilla': [],
         'q_model': [],
@@ -1226,33 +1330,38 @@ def generate(prompt, images=None, preload=None, blind_model=False, quantize_mode
         preload = load(blind_model=blind_model, quantize_model=quantize_model, quantize_cache=quantize_cache, use_adapter=use_adapter)
     return _generate(*preload, *_apply_chat_template(prompt, images, verbose, apply_chat_template), max_tokens=max_tokens, verbose=verbose, return_tps=return_tps, early_stop=early_stop, stream=stream)
 
-def constrain(prompt, constraints=[(30, ' The correct answer is'), (10, 'X.')], images=None, preload=None, blind_model=False, quantize_model=False, quantize_cache=False, use_adapter=False, apply_chat_template=True):
+def constrain(prompt, constraints=[(30, ' The correct answer is'), (10, 'X.')], images=None, preload=None, blind_model=False, quantize_model=False, quantize_cache=False, use_adapter=False, apply_chat_template=True, use_beam=False):
     """
     Perform constrained decoding on the given prompt using specified constraints.
+
+    This function generates text based on the input prompt while adhering to the specified constraints.
+    It supports various model configurations and can handle both text and image inputs.
 
     Parameters:
     -----------
     prompt : str or list of str
         The input prompt(s) for text generation.
-    constraints : list of tuples, optional
+    constraints : list of tuple, optional
         List of constraints in the format [(max_tokens, constraint_text), ...].
         Each constraint specifies the maximum number of tokens to generate before the constraint_text
-        must appear. Defaults to [(30, ' The correct answer is'), (10, 'X.')].
+        must appear. Default is [(30, ' The correct answer is'), (10, 'X.')].
     images : list or None, optional
-        List of image inputs for multimodal models. Defaults to None.
-    preload : tuple, optional
+        List of image inputs for multimodal models. Default is None.
+    preload : tuple or None, optional
         A tuple containing (model, processor) if already loaded. If None, the function will load
-        the model and processor based on the provided configuration. Defaults to None.
+        the model and processor based on the provided configuration. Default is None.
     blind_model : bool, optional
-        If True, uses a model without vision capabilities. Defaults to False.
+        If True, uses a model without vision capabilities. Default is False.
     quantize_model : bool, optional
-        If True, uses a quantized version of the model. Defaults to False.
+        If True, uses a quantized version of the model for reduced memory usage. Default is False.
     quantize_cache : bool, optional
-        If True, uses cache quantization. Defaults to False.
+        If True, uses cache quantization for improved memory efficiency. Default is False.
     use_adapter : bool, optional
-        If True, uses a LoRA adapter with the model. Defaults to False.
+        If True, uses a LoRA adapter with the model for fine-tuned behavior. Default is False.
     apply_chat_template : bool, optional
-        If True, applies a chat template to the prompt before processing. Defaults to True.
+        If True, applies a chat template to the prompt before processing. Default is True.
+    use_beam : bool, optional
+        If True, uses beam search for generation instead of greedy decoding. Default is False.
 
     Returns:
     --------
@@ -1263,21 +1372,29 @@ def constrain(prompt, constraints=[(30, ' The correct answer is'), (10, 'X.')], 
     Notes:
     ------
     - The function preprocesses the prompt and applies the constraints sequentially.
-    - It uses a custom constrained generation algorithm to ensure the output adheres to the constraints.
+    - It uses either a custom constrained generation algorithm or beam search to ensure the output adheres to the constraints.
     - The output format matches the input format (str or list of str).
     - If apply_chat_template is True, the prompt is processed through a chat template before generation.
 
     Example:
     --------
     >>> prompt = "Write a Python function to calculate the Fibonacci sequence up to a given number n."
-    >>> constraints = [(100, "\n```python\n"), (100, " return "), (100, "\n```")]
-    >>> constrain(prompt, constraints)
+    >>> constraints = ...
+    >>> result = constrain(prompt, constraints)
+    >>> print(result)
     """
+    # constrain ("Write a Python function to calculate the Fibonacci sequence up to a given number n.", [(100, "\n```python\n"), (100, " return "), (200, "\n```")])
+    # prompts = [
+    #     "A 20-year-old woman presents with menorrhagia for the past several years. She says that her menses “have always been heavy”, and she has experienced easy bruising for as long as she can remember. Family history is significant for her mother, who had similar problems with bruising easily. The patient's vital signs include: heart rate 98/min, respiratory rate 14/min, temperature 36.1°C (96.9°F), and blood pressure 110/87 mm Hg. Physical examination is unremarkable. Laboratory tests show the following: platelet count 200,000/mm3, PT 12 seconds, and PTT 43 seconds. Which of the following is the most likely cause of this patient’s symptoms? A: Factor V Leiden B: Hemophilia A C: Lupus anticoagulant D: Protein C deficiency E: Von Willebrand disease",
+    #     "A 25-year-old primigravida presents to her physician for a routine prenatal visit. She is at 34 weeks gestation, as confirmed by an ultrasound examination. She has no complaints, but notes that the new shoes she bought 2 weeks ago do not fit anymore. The course of her pregnancy has been uneventful and she has been compliant with the recommended prenatal care. Her medical history is unremarkable. She has a 15-pound weight gain since the last visit 3 weeks ago. Her vital signs are as follows: blood pressure, 148/90 mm Hg; heart rate, 88/min; respiratory rate, 16/min; and temperature, 36.6℃ (97.9℉). The blood pressure on repeat assessment 4 hours later is 151/90 mm Hg. The fetal heart rate is 151/min. The physical examination is significant for 2+ pitting edema of the lower extremity. Which of the following tests o should confirm the probable condition of this patient? A: Bilirubin assessment B: Coagulation studies C: Hematocrit assessment D: Leukocyte count with differential E: 24-hour urine protein"]
+    # constrain(prompts, constraints=[(30, ' The correct answer is'), (10, 'X.')], blind_model=True, quantize_model=True)
     if preload is None:
         model, processor = load(blind_model=blind_model, quantize_model=quantize_model, quantize_cache=quantize_cache, use_adapter=use_adapter)
         preload = model, processor
     if apply_chat_template:
         prompt = _apply_chat_template(prompt, None, False)[0]
+    if use_beam:
+        return _beam(*preload, prompt=prompt, constraints=constraints)
     return _constrain(*preload, prompt=prompt, constraints=constraints)
 
 def execute(code_strings, file_prefix=0, verbose=True):
