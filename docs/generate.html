@@ -52,6 +52,7 @@
 <li class="toctree-l2"><a class="reference internal" href="#visual-question-answering">Visual Question Answering</a></li>
 <li class="toctree-l2"><a class="reference internal" href="#batch-text-generation">Batch Text Generation</a></li>
 <li class="toctree-l2"><a class="reference internal" href="#structured-generation-using-constrained-decoding">Structured Generation Using Constrained Decoding</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#multiple-choice-selection">Multiple Choice Selection</a></li>
 <li class="toctree-l2"><a class="reference internal" href="#model-and-cache-quantization">Model and Cache Quantization</a></li>
 </ul>
 </li>
@@ -151,6 +152,30 @@
     <span class="s2">&quot;A 25-year-old primigravida presents to her physician for a routine prenatal visit. She is at 34 weeks gestation, as confirmed by an ultrasound examination. She has no complaints, but notes that the new shoes she bought 2 weeks ago do not fit anymore. The course of her pregnancy has been uneventful and she has been compliant with the recommended prenatal care. Her medical history is unremarkable. She has a 15-pound weight gain since the last visit 3 weeks ago. Her vital signs are as follows: blood pressure, 148/90 mm Hg; heart rate, 88/min; respiratory rate, 16/min; and temperature, 36.6℃ (97.9℉). The blood pressure on repeat assessment 4 hours later is 151/90 mm Hg. The fetal heart rate is 151/min. The physical examination is significant for 2+ pitting edema of the lower extremity. Which of the following tests o should confirm the probable condition of this patient? A: Bilirubin assessment B: Coagulation studies C: Hematocrit assessment D: Leukocyte count with differential E: 24-hour urine protein&quot;</span><span class="p">]</span>
 
 <span class="n">constrain</span><span class="p">(</span><span class="n">prompts</span><span class="p">,</span> <span class="n">constraints</span><span class="o">=</span><span class="p">[(</span><span class="mi">30</span><span class="p">,</span> <span class="s1">&#39; The correct answer is&#39;</span><span class="p">),</span> <span class="p">(</span><span class="mi">10</span><span class="p">,</span> <span class="s1">&#39;X.&#39;</span><span class="p">)],</span> <span class="n">blind_model</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">quantize_model</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+</pre></div>
+</div>
+</section>
+<section id="multiple-choice-selection">
+<h2>Multiple Choice Selection<a class="headerlink" href="#multiple-choice-selection" title="Link to this heading">¶</a></h2>
+<p>The <code class="docutils literal notranslate"><span class="pre">choose()</span></code> function provides a straightforward way to select the best option from a set of choices for a given prompt. This is particularly useful for multiple-choice questions or decision-making scenarios.</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span> <span class="nn">phi_3_vision_mlx</span> <span class="kn">import</span> <span class="n">choose</span>
+
+<span class="n">prompt</span> <span class="o">=</span> <span class="s2">&quot;What is the capital of France? A: London B: Berlin C: Paris D: Madrid E: Rome&quot;</span>
+<span class="n">result</span> <span class="o">=</span> <span class="n">choose</span><span class="p">(</span><span class="n">prompt</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="n">result</span><span class="p">)</span>  <span class="c1"># Output: &#39;C&#39;</span>
+
+<span class="c1"># Using with custom choices</span>
+<span class="n">custom_prompt</span> <span class="o">=</span> <span class="s2">&quot;Which color is associated with stopping at traffic lights? R: Red Y: Yellow G: Green&quot;</span>
+<span class="n">custom_result</span> <span class="o">=</span> <span class="n">choose</span><span class="p">(</span><span class="n">custom_prompt</span><span class="p">,</span> <span class="n">choices</span><span class="o">=</span><span class="s1">&#39;RYG&#39;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="n">custom_result</span><span class="p">)</span>  <span class="c1"># Output: &#39;R&#39;</span>
+
+<span class="c1"># Batch processing</span>
+<span class="n">prompts</span> <span class="o">=</span> <span class="p">[</span>
+    <span class="s2">&quot;What is the largest planet in our solar system? A: Earth B: Mars C: Jupiter D: Saturn&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;Which element has the chemical symbol &#39;O&#39;? A: Osmium B: Oxygen C: Gold D: Silver&quot;</span>
+<span class="p">]</span>
+<span class="n">batch_results</span> <span class="o">=</span> <span class="n">choose</span><span class="p">(</span><span class="n">prompts</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="n">batch_results</span><span class="p">)</span>  <span class="c1"># Output: [&#39;C&#39;, &#39;B&#39;]</span>
 </pre></div>
 </div>
 </section>

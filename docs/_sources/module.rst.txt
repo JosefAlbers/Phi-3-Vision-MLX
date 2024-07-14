@@ -20,6 +20,12 @@ generate
 
 .. autofunction:: phi_3_vision_mlx.generate
 
+choose
+^^^^^^
+
+.. autofunction:: phi_3_vision_mlx.choose
+
+
 constrain
 ^^^^^^^^^
 
@@ -59,3 +65,13 @@ add_code
 ^^^^^^^^
 
 .. autofunction:: phi_3_vision_mlx.add_code
+
+add_text
+^^^^^^^^
+
+.. autofunction:: phi_3_vision_mlx.add_text
+
+rag
+^^^
+
+.. autofunction:: phi_3_vision_mlx.rag

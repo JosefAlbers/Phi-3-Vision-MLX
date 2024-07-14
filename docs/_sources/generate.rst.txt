@@ -59,6 +59,31 @@ The ``constrain()`` function can also guide the model to provide reasoning befor
 
     constrain(prompts, constraints=[(30, ' The correct answer is'), (10, 'X.')], blind_model=True, quantize_model=True)
 
+Multiple Choice Selection
+-------------------------
+
+The ``choose()`` function provides a straightforward way to select the best option from a set of choices for a given prompt. This is particularly useful for multiple-choice questions or decision-making scenarios.
+
+.. code-block:: python
+    
+    from phi_3_vision_mlx import choose
+
+    prompt = "What is the capital of France? A: London B: Berlin C: Paris D: Madrid E: Rome"
+    result = choose(prompt)
+    print(result)  # Output: 'C'
+
+    # Using with custom choices
+    custom_prompt = "Which color is associated with stopping at traffic lights? R: Red Y: Yellow G: Green"
+    custom_result = choose(custom_prompt, choices='RYG')
+    print(custom_result)  # Output: 'R'
+
+    # Batch processing
+    prompts = [
+        "What is the largest planet in our solar system? A: Earth B: Mars C: Jupiter D: Saturn",
+        "Which element has the chemical symbol 'O'? A: Osmium B: Oxygen C: Gold D: Silver"
+    ]
+    batch_results = choose(prompts)
+    print(batch_results)  # Output: ['C', 'B']
 
 Model and Cache Quantization
 ----------------------------

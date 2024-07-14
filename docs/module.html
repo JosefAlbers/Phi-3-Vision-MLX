@@ -247,9 +247,60 @@ if return_tps is True.</p>
 <section id="id8">
 <h3>Notes:<a class="headerlink" href="#id8" title="Link to this heading">¶</a></h3>
 <ul class="simple">
-<li><p>If ‘&lt;<a href="#id39"><span class="problematic" id="id40">|api_input|</span></a>&gt;’ is in the prompt, it will call get_api() instead.</p></li>
+<li><p>If ‘&lt;<a href="#id50"><span class="problematic" id="id51">|api_input|</span></a>&gt;’ is in the prompt, it will call get_api() instead.</p></li>
 <li><p>The function can handle both text-only and text-image inputs.</p></li>
 </ul>
+</section>
+</dd></dl>
+
+</section>
+<section id="choose">
+<h2>choose<a class="headerlink" href="#choose" title="Link to this heading">¶</a></h2>
+<dl class="py function">
+<dt class="sig sig-object py" id="phi_3_vision_mlx.choose">
+<span class="sig-prename descclassname"><span class="pre">phi_3_vision_mlx.</span></span><span class="sig-name descname"><span class="pre">choose</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">prompt</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">choices</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">'ABCDE'</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">images</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">preload</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">blind_model</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">False</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">quantize_model</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">False</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">quantize_cache</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">False</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">use_adapter</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">False</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">apply_chat_template</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">True</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#phi_3_vision_mlx.choose" title="Link to this definition">¶</a></dt>
+<dd><p>Choose the best option from a set of choices for a given prompt.</p>
+<p>It selects the most appropriate answer from a set of choices based on the input prompt.</p>
+<section id="id9">
+<h3>Parameters:<a class="headerlink" href="#id9" title="Link to this heading">¶</a></h3>
+<dl class="simple">
+<dt>prompt<span class="classifier">str or list of str</span></dt><dd><p>The input prompt(s) for which to choose an answer.</p>
+</dd>
+<dt>choices<span class="classifier">str, optional</span></dt><dd><p>A string containing the possible choices. Default is ‘ABCDE’.</p>
+</dd>
+<dt>images<span class="classifier">list or None, optional</span></dt><dd><p>List of image inputs for multimodal models. Default is None.</p>
+</dd>
+<dt>preload<span class="classifier">tuple or None, optional</span></dt><dd><p>A tuple containing (model, processor) if already loaded. If None, the function will load
+the model and processor based on the provided configuration. Default is None.</p>
+</dd>
+<dt>blind_model<span class="classifier">bool, optional</span></dt><dd><p>If True, uses a model without vision capabilities. Default is False.</p>
+</dd>
+<dt>quantize_model<span class="classifier">bool, optional</span></dt><dd><p>If True, uses a quantized version of the model for reduced memory usage. Default is False.</p>
+</dd>
+<dt>quantize_cache<span class="classifier">bool, optional</span></dt><dd><p>If True, uses cache quantization for improved memory efficiency. Default is False.</p>
+</dd>
+<dt>use_adapter<span class="classifier">bool, optional</span></dt><dd><p>If True, uses a LoRA adapter with the model for fine-tuned behavior. Default is False.</p>
+</dd>
+<dt>apply_chat_template<span class="classifier">bool, optional</span></dt><dd><p>If True, applies a chat template to the prompt before processing. Default is True.</p>
+</dd>
+</dl>
+</section>
+<section id="id10">
+<h3>Returns:<a class="headerlink" href="#id10" title="Link to this heading">¶</a></h3>
+<dl class="simple">
+<dt>str or list of str</dt><dd><p>The chosen answer(s) from the provided choices. Returns a single string if
+the input prompt was a string, otherwise returns a list of strings.</p>
+</dd>
+</dl>
+</section>
+<section id="id11">
+<h3>Example:<a class="headerlink" href="#id11" title="Link to this heading">¶</a></h3>
+<div class="doctest highlight-default notranslate"><div class="highlight"><pre><span></span><span class="gp">&gt;&gt;&gt; </span><span class="n">prompt</span> <span class="o">=</span> <span class="s2">&quot;What is the capital of France? A: London B: Berlin C: Paris D: Madrid E: Rome&quot;</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">result</span> <span class="o">=</span> <span class="n">choose</span><span class="p">(</span><span class="n">prompt</span><span class="p">)</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="nb">print</span><span class="p">(</span><span class="n">result</span><span class="p">)</span>
+<span class="go">&#39;C&#39;</span>
+</pre></div>
+</div>
 </section>
 </dd></dl>
 
@@ -262,8 +313,8 @@ if return_tps is True.</p>
 <dd><p>Perform constrained decoding on the given prompt using specified constraints.</p>
 <p>This function generates text based on the input prompt while adhering to the specified constraints.
 It supports various model configurations and can handle both text and image inputs.</p>
-<section id="id9">
-<h3>Parameters:<a class="headerlink" href="#id9" title="Link to this heading">¶</a></h3>
+<section id="id12">
+<h3>Parameters:<a class="headerlink" href="#id12" title="Link to this heading">¶</a></h3>
 <dl class="simple">
 <dt>prompt<span class="classifier">str or list of str</span></dt><dd><p>The input prompt(s) for text generation.</p>
 </dd>
@@ -290,16 +341,16 @@ the model and processor based on the provided configuration. Default is None.</p
 </dd>
 </dl>
 </section>
-<section id="id10">
-<h3>Returns:<a class="headerlink" href="#id10" title="Link to this heading">¶</a></h3>
+<section id="id13">
+<h3>Returns:<a class="headerlink" href="#id13" title="Link to this heading">¶</a></h3>
 <dl class="simple">
 <dt>str or list of str</dt><dd><p>The generated text(s) adhering to the specified constraints. Returns a single string if
 the input prompt was a string, otherwise returns a list of strings.</p>
 </dd>
 </dl>
 </section>
-<section id="id11">
-<h3>Notes:<a class="headerlink" href="#id11" title="Link to this heading">¶</a></h3>
+<section id="id14">
+<h3>Notes:<a class="headerlink" href="#id14" title="Link to this heading">¶</a></h3>
 <ul class="simple">
 <li><p>The function preprocesses the prompt and applies the constraints sequentially.</p></li>
 <li><p>It uses either a custom constrained generation algorithm or beam search to ensure the output adheres to the constraints.</p></li>
@@ -307,8 +358,8 @@ the input prompt was a string, otherwise returns a list of strings.</p>
 <li><p>If apply_chat_template is True, the prompt is processed through a chat template before generation.</p></li>
 </ul>
 </section>
-<section id="id12">
-<h3>Example:<a class="headerlink" href="#id12" title="Link to this heading">¶</a></h3>
+<section id="id15">
+<h3>Example:<a class="headerlink" href="#id15" title="Link to this heading">¶</a></h3>
 <div class="doctest highlight-default notranslate"><div class="highlight"><pre><span></span><span class="gp">&gt;&gt;&gt; </span><span class="n">prompt</span> <span class="o">=</span> <span class="s2">&quot;Write a Python function to calculate the Fibonacci sequence up to a given number n.&quot;</span>
 <span class="gp">&gt;&gt;&gt; </span><span class="n">constraints</span> <span class="o">=</span> <span class="o">...</span>
 <span class="gp">&gt;&gt;&gt; </span><span class="n">result</span> <span class="o">=</span> <span class="n">constrain</span><span class="p">(</span><span class="n">prompt</span><span class="p">,</span> <span class="n">constraints</span><span class="p">)</span>
@@ -325,8 +376,8 @@ the input prompt was a string, otherwise returns a list of strings.</p>
 <dt class="sig sig-object py" id="phi_3_vision_mlx.execute">
 <span class="sig-prename descclassname"><span class="pre">phi_3_vision_mlx.</span></span><span class="sig-name descname"><span class="pre">execute</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">code_strings</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">file_prefix</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">0</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">verbose</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">True</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#phi_3_vision_mlx.execute" title="Link to this definition">¶</a></dt>
 <dd><p>Execute one or more Python code strings and capture the results.</p>
-<section id="id13">
-<h3>Parameters:<a class="headerlink" href="#id13" title="Link to this heading">¶</a></h3>
+<section id="id16">
+<h3>Parameters:<a class="headerlink" href="#id16" title="Link to this heading">¶</a></h3>
 <dl class="simple">
 <dt>code_strings<span class="classifier">str or list of str</span></dt><dd><p>A single code string or a list of code strings to execute.</p>
 </dd>
@@ -336,8 +387,8 @@ the input prompt was a string, otherwise returns a list of strings.</p>
 </dd>
 </dl>
 </section>
-<section id="id14">
-<h3>Returns:<a class="headerlink" href="#id14" title="Link to this heading">¶</a></h3>
+<section id="id17">
+<h3>Returns:<a class="headerlink" href="#id17" title="Link to this heading">¶</a></h3>
 <dl class="simple">
 <dt>dict</dt><dd><p>A dictionary containing lists of execution results:
 - ‘codes’: The input code strings
@@ -347,8 +398,8 @@ the input prompt was a string, otherwise returns a list of strings.</p>
 </dd>
 </dl>
 </section>
-<section id="id15">
-<h3>Notes:<a class="headerlink" href="#id15" title="Link to this heading">¶</a></h3>
+<section id="id18">
+<h3>Notes:<a class="headerlink" href="#id18" title="Link to this heading">¶</a></h3>
 <ul class="simple">
 <li><p>Each code string is executed in a separate environment.</p></li>
 <li><p>The function captures standard output, standard error, and any generated files.</p></li>
@@ -362,12 +413,12 @@ the input prompt was a string, otherwise returns a list of strings.</p>
 <h2>train_lora<a class="headerlink" href="#train-lora" title="Link to this heading">¶</a></h2>
 <dl class="py function">
 <dt class="sig sig-object py" id="phi_3_vision_mlx.train_lora">
-<span class="sig-prename descclassname"><span class="pre">phi_3_vision_mlx.</span></span><span class="sig-name descname"><span class="pre">train_lora</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">model_path</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">'models/phi3_mini_128k_Q'</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">adapter_path</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">lora_targets</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">['self_attn.qkv_proj',</span> <span class="pre">'self_attn.o_proj']</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">lora_layers</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">1</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">lora_rank</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">1</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">epochs</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">1</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">batch_size</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">1</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">take</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">10</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">lr</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">0.0001</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">warmup</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">0.5</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">mask_ratios</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">dataset_path</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">'JosefAlbers/akemiH_MedQA_Reason'</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#phi_3_vision_mlx.train_lora" title="Link to this definition">¶</a></dt>
+<span class="sig-prename descclassname"><span class="pre">phi_3_vision_mlx.</span></span><span class="sig-name descname"><span class="pre">train_lora</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">model_path</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">'models/phi3_mini_128k_Q'</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">adapter_path</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">lora_targets</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">['self_attn.qkv_proj']</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">lora_layers</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">1</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">lora_rank</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">1</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">epochs</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">1</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">batch_size</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">1</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">take</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">10</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">lr</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">0.0001</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">warmup</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">0.5</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">mask_ratios</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">dataset_path</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">'JosefAlbers/akemiH_MedQA_Reason'</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#phi_3_vision_mlx.train_lora" title="Link to this definition">¶</a></dt>
 <dd><p>Train a LoRA (Low-Rank Adaptation) model using the specified parameters.</p>
 <p>This function loads a pre-trained model, applies LoRA adaptations, and fine-tunes it on a given dataset.
 It supports various training configurations, including masking strategies and learning rate scheduling.</p>
-<section id="id16">
-<h3>Parameters:<a class="headerlink" href="#id16" title="Link to this heading">¶</a></h3>
+<section id="id19">
+<h3>Parameters:<a class="headerlink" href="#id19" title="Link to this heading">¶</a></h3>
 <dl class="simple">
 <dt>model_path<span class="classifier">str, optional</span></dt><dd><p>Path to the base model. Defaults to PATH_QUANTIZED_PHI3_BLIND.</p>
 </dd>
@@ -394,15 +445,15 @@ Defaults to None.</p>
 </dd>
 </dl>
 </section>
-<section id="id17">
-<h3>Returns:<a class="headerlink" href="#id17" title="Link to this heading">¶</a></h3>
+<section id="id20">
+<h3>Returns:<a class="headerlink" href="#id20" title="Link to this heading">¶</a></h3>
 <dl class="simple">
 <dt>None</dt><dd><p>The function doesn’t return a value but saves the trained LoRA adapter to the specified path.</p>
 </dd>
 </dl>
 </section>
-<section id="id18">
-<h3>Notes:<a class="headerlink" href="#id18" title="Link to this heading">¶</a></h3>
+<section id="id21">
+<h3>Notes:<a class="headerlink" href="#id21" title="Link to this heading">¶</a></h3>
 <ul class="simple">
 <li><p>The function uses several helper methods for data processing, loss calculation, and training.</p></li>
 <li><p>It applies a learning rate schedule with warmup.</p></li>
@@ -411,8 +462,8 @@ Defaults to None.</p>
 <li><p>After training, it cleans up by deleting the model and processor to free memory.</p></li>
 </ul>
 </section>
-<section id="id19">
-<h3>Example:<a class="headerlink" href="#id19" title="Link to this heading">¶</a></h3>
+<section id="id22">
+<h3>Example:<a class="headerlink" href="#id22" title="Link to this heading">¶</a></h3>
 <div class="doctest highlight-default notranslate"><div class="highlight"><pre><span></span><span class="gp">&gt;&gt;&gt; </span><span class="n">train_lora</span><span class="p">(</span><span class="n">lora_layers</span><span class="o">=</span><span class="mi">5</span><span class="p">,</span> <span class="n">lora_rank</span><span class="o">=</span><span class="mi">16</span><span class="p">,</span> <span class="n">epochs</span><span class="o">=</span><span class="mi">10</span><span class="p">,</span>
 <span class="gp">... </span>           <span class="n">take</span><span class="o">=</span><span class="mi">10</span><span class="p">,</span> <span class="n">batch_size</span><span class="o">=</span><span class="mi">2</span><span class="p">,</span> <span class="n">lr</span><span class="o">=</span><span class="mf">1e-4</span><span class="p">,</span> <span class="n">warmup</span><span class="o">=</span><span class="mf">.5</span><span class="p">,</span>
 <span class="gp">... </span>           <span class="n">dataset_path</span><span class="o">=</span><span class="s2">&quot;JosefAlbers/akemiH_MedQA_Reason&quot;</span><span class="p">)</span>
@@ -426,12 +477,12 @@ Defaults to None.</p>
 <h2>test_lora<a class="headerlink" href="#test-lora" title="Link to this heading">¶</a></h2>
 <dl class="py function">
 <dt class="sig sig-object py" id="phi_3_vision_mlx.test_lora">
-<span class="sig-prename descclassname"><span class="pre">phi_3_vision_mlx.</span></span><span class="sig-name descname"><span class="pre">test_lora</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">model_path</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">'models/phi3_mini_128k_Q'</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">adapter_path</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">True</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">dataset_path</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">'JosefAlbers/akemiH_MedQA_Reason'</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">take</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">(0,</span> <span class="pre">10)</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">batch_size</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">10</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#phi_3_vision_mlx.test_lora" title="Link to this definition">¶</a></dt>
+<span class="sig-prename descclassname"><span class="pre">phi_3_vision_mlx.</span></span><span class="sig-name descname"><span class="pre">test_lora</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">model_path</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">'models/phi3_mini_128k_Q'</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">adapter_path</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">True</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">dataset_path</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">'JosefAlbers/akemiH_MedQA_Reason'</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">take</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">(0,</span> <span class="pre">10)</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">batch_size</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">10</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">test_result_path</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">'test_result.csv'</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#phi_3_vision_mlx.test_lora" title="Link to this definition">¶</a></dt>
 <dd><p>Test a LoRA (Low-Rank Adaptation) model on a given dataset using various generation methods.</p>
 <p>This function loads a model and its LoRA adapter (if specified), processes a dataset, and evaluates
 the model’s performance on recall (summarization) and answer generation tasks using different methods.</p>
-<section id="id20">
-<h3>Parameters:<a class="headerlink" href="#id20" title="Link to this heading">¶</a></h3>
+<section id="id23">
+<h3>Parameters:<a class="headerlink" href="#id23" title="Link to this heading">¶</a></h3>
 <dl class="simple">
 <dt>model_path<span class="classifier">str, optional</span></dt><dd><p>Path to the base model. Default is PATH_QUANTIZED_PHI3_BLIND.</p>
 </dd>
@@ -447,15 +498,15 @@ If int, takes (0, take) samples. Default is (0, 10).</p>
 </dd>
 </dl>
 </section>
-<section id="id21">
-<h3>Returns:<a class="headerlink" href="#id21" title="Link to this heading">¶</a></h3>
+<section id="id24">
+<h3>Returns:<a class="headerlink" href="#id24" title="Link to this heading">¶</a></h3>
 <dl class="simple">
 <dt>None</dt><dd><p>The function prints the evaluation results but doesn’t return any value.</p>
 </dd>
 </dl>
 </section>
-<section id="id22">
-<h3>Notes:<a class="headerlink" href="#id22" title="Link to this heading">¶</a></h3>
+<section id="id25">
+<h3>Notes:<a class="headerlink" href="#id25" title="Link to this heading">¶</a></h3>
 <ul class="simple">
 <li><p>Performs three tasks: recall of trained texts, answer generation using _choose_from(),
 and answer generation using constrained decoding.</p></li>
@@ -469,8 +520,8 @@ and answer generation using constrained decoding.</p></li>
 <li><p>The model and processor are deleted after use to free up memory.</p></li>
 </ul>
 </section>
-<section id="id23">
-<h3>Example:<a class="headerlink" href="#id23" title="Link to this heading">¶</a></h3>
+<section id="id26">
+<h3>Example:<a class="headerlink" href="#id26" title="Link to this heading">¶</a></h3>
 <div class="doctest highlight-default notranslate"><div class="highlight"><pre><span></span><span class="gp">&gt;&gt;&gt; </span><span class="n">test_lora</span><span class="p">(</span><span class="n">model_path</span><span class="o">=</span><span class="s2">&quot;path/to/model&quot;</span><span class="p">,</span> <span class="n">adapter_path</span><span class="o">=</span><span class="s2">&quot;path/to/adapter&quot;</span><span class="p">,</span>
 <span class="gp">... </span>          <span class="n">dataset_path</span><span class="o">=</span><span class="s2">&quot;dataset/path&quot;</span><span class="p">,</span> <span class="n">take</span><span class="o">=</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="mi">10</span><span class="p">),</span> <span class="n">batch_size</span><span class="o">=</span><span class="mi">10</span><span class="p">)</span>
 </pre></div>
@@ -488,16 +539,16 @@ and answer generation using constrained decoding.</p></li>
 <p>This function tests various configurations of a language model (vanilla, quantized model,
 quantized cache, and LoRA) on a set of predefined prompts. It measures the performance
 in terms of tokens per second (TPS) for both prompt processing and text generation.</p>
-<section id="id24">
-<h3>Parameters:<a class="headerlink" href="#id24" title="Link to this heading">¶</a></h3>
+<section id="id27">
+<h3>Parameters:<a class="headerlink" href="#id27" title="Link to this heading">¶</a></h3>
 <dl class="simple">
 <dt>blind_model<span class="classifier">bool, optional</span></dt><dd><p>If True, uses a ‘blind’ version of the model (details depend on implementation).
 Defaults to False.</p>
 </dd>
 </dl>
 </section>
-<section id="id25">
-<h3>Returns:<a class="headerlink" href="#id25" title="Link to this heading">¶</a></h3>
+<section id="id28">
+<h3>Returns:<a class="headerlink" href="#id28" title="Link to this heading">¶</a></h3>
 <dl class="simple">
 <dt>None</dt><dd><p>The function doesn’t return a value but saves the benchmark results to a JSON file
 and prints a formatted version of the results.</p>
@@ -517,8 +568,8 @@ and prints a formatted version of the results.</p>
 <li><p>Calls a function to format and print the benchmark results.</p></li>
 </ol>
 </section>
-<section id="id26">
-<h3>Notes:<a class="headerlink" href="#id26" title="Link to this heading">¶</a></h3>
+<section id="id29">
+<h3>Notes:<a class="headerlink" href="#id29" title="Link to this heading">¶</a></h3>
 <ul class="simple">
 <li><p>The function uses predefined prompts, including a mix of text-only and image-text tasks.</p></li>
 <li><p>It generates 100 tokens for each prompt.</p></li>
@@ -528,8 +579,8 @@ and prints a formatted version of the results.</p>
 <li><p>Requires ‘generate’, ‘load’, and ‘_format_benchmark’ functions to be defined elsewhere.</p></li>
 </ul>
 </section>
-<section id="id27">
-<h3>Example:<a class="headerlink" href="#id27" title="Link to this heading">¶</a></h3>
+<section id="id30">
+<h3>Example:<a class="headerlink" href="#id30" title="Link to this heading">¶</a></h3>
 <div class="doctest highlight-default notranslate"><div class="highlight"><pre><span></span><span class="gp">&gt;&gt;&gt; </span><span class="n">benchmark</span><span class="p">()</span>
 <span class="go"># This will run the benchmark and save results to &#39;benchmark.json&#39;,</span>
 <span class="go"># then print a formatted version of the results.</span>
@@ -553,23 +604,23 @@ and prints a formatted version of the results.</p>
 It supports text input and file uploads (specifically images) and displays the conversation history.</p>
 <p>This function is also the entry point for the ‘phi3v’ command-line tool, which can be run directly
 from the terminal after installing the phi-3-vision-mlx package.</p>
-<section id="id28">
-<h3>Parameters:<a class="headerlink" href="#id28" title="Link to this heading">¶</a></h3>
+<section id="id31">
+<h3>Parameters:<a class="headerlink" href="#id31" title="Link to this heading">¶</a></h3>
 <dl class="simple">
 <dt>agent<span class="classifier">Agent, optional</span></dt><dd><p>An instance of the Agent class to handle the chat logic. If None, a new Agent instance is created.
 Default is None.</p>
 </dd>
 </dl>
 </section>
-<section id="id29">
-<h3>Returns:<a class="headerlink" href="#id29" title="Link to this heading">¶</a></h3>
+<section id="id32">
+<h3>Returns:<a class="headerlink" href="#id32" title="Link to this heading">¶</a></h3>
 <dl class="simple">
 <dt>None</dt><dd><p>The function launches a Gradio interface and doesn’t return a value.</p>
 </dd>
 </dl>
 </section>
-<section id="id30">
-<h3>Behavior:<a class="headerlink" href="#id30" title="Link to this heading">¶</a></h3>
+<section id="id33">
+<h3>Behavior:<a class="headerlink" href="#id33" title="Link to this heading">¶</a></h3>
 <ol class="arabic simple">
 <li><p>Initializes the chat agent if not provided.</p></li>
 <li><p>Defines helper functions for message handling and bot responses:
@@ -584,11 +635,11 @@ Default is None.</p>
 <li><p>Launches the Gradio interface in the browser.</p></li>
 </ol>
 </section>
-<section id="id31">
-<h3>Notes:<a class="headerlink" href="#id31" title="Link to this heading">¶</a></h3>
+<section id="id34">
+<h3>Notes:<a class="headerlink" href="#id34" title="Link to this heading">¶</a></h3>
 <ul class="simple">
 <li><p>The interface supports both text and image inputs.</p></li>
-<li><p>Bot responses are processed to remove ‘&lt;<a href="#id41"><span class="problematic" id="id42">|end|</span></a>&gt;’ tokens and empty lines.</p></li>
+<li><p>Bot responses are processed to remove ‘&lt;<a href="#id52"><span class="problematic" id="id53">|end|</span></a>&gt;’ tokens and empty lines.</p></li>
 <li><p>The chat history keeps track of user inputs and bot responses, including file uploads.</p></li>
 <li><p>The interface is set to occupy 80% of the viewport height.</p></li>
 <li><p>The Gradio footer is hidden using custom CSS.</p></li>
@@ -608,8 +659,8 @@ Default is None.</p>
 <p>$ phi3v</p>
 <p>This will launch the chat interface in your default web browser.</p>
 </section>
-<section id="id32">
-<h3>Example:<a class="headerlink" href="#id32" title="Link to this heading">¶</a></h3>
+<section id="id35">
+<h3>Example:<a class="headerlink" href="#id35" title="Link to this heading">¶</a></h3>
 <div class="doctest highlight-default notranslate"><div class="highlight"><pre><span></span><span class="gp">&gt;&gt;&gt; </span><span class="n">chat_ui</span><span class="p">()</span>
 <span class="go"># This will launch the chat interface in the default web browser.</span>
 </pre></div>
@@ -631,12 +682,12 @@ Default is None.</p>
 <dd><p>Retrieve and format API code based on input prompts using vector similarity search.</p>
 <p>This function uses a Vector Database (VDB) to find the most relevant API code
 for given prompts. It’s designed to work with prompts that may contain the
-‘&lt;<a href="#id43"><span class="problematic" id="id44">|api_input|</span></a>&gt;’ delimiter to separate the API request from additional input.</p>
-<section id="id33">
-<h3>Parameters:<a class="headerlink" href="#id33" title="Link to this heading">¶</a></h3>
+‘&lt;<a href="#id54"><span class="problematic" id="id55">|api_input|</span></a>&gt;’ delimiter to separate the API request from additional input.</p>
+<section id="id36">
+<h3>Parameters:<a class="headerlink" href="#id36" title="Link to this heading">¶</a></h3>
 <dl class="simple">
 <dt>prompt<span class="classifier">str or list of str</span></dt><dd><p>The input prompt(s) to search for relevant API code. If a prompt contains
-‘&lt;<a href="#id45"><span class="problematic" id="id46">|api_input|</span></a>&gt;’, the part before it is used for the search, and the part
+‘&lt;<a href="#id56"><span class="problematic" id="id57">|api_input|</span></a>&gt;’, the part before it is used for the search, and the part
 after it is used to format the retrieved code.</p>
 </dd>
 <dt>n_topk<span class="classifier">int, optional</span></dt><dd><p>The number of top matching API codes to retrieve for each prompt. Default is 1.</p>
@@ -645,24 +696,24 @@ after it is used to format the retrieved code.</p>
 </dd>
 </dl>
 </section>
-<section id="id34">
-<h3>Returns:<a class="headerlink" href="#id34" title="Link to this heading">¶</a></h3>
+<section id="id37">
+<h3>Returns:<a class="headerlink" href="#id37" title="Link to this heading">¶</a></h3>
 <dl class="simple">
 <dt>list of str</dt><dd><p>A list of formatted API code strings relevant to the input prompt(s).</p>
 </dd>
 </dl>
 </section>
-<section id="id35">
-<h3>Notes:<a class="headerlink" href="#id35" title="Link to this heading">¶</a></h3>
+<section id="id38">
+<h3>Notes:<a class="headerlink" href="#id38" title="Link to this heading">¶</a></h3>
 <ul class="simple">
 <li><p>The function uses a VDB (Vector Database) for similarity search.</p></li>
 <li><p>If multiple prompts are provided, it returns a list of API codes for each prompt.</p></li>
-<li><p>The retrieved API code is formatted with the part of the prompt after ‘&lt;<a href="#id47"><span class="problematic" id="id48">|api_input|</span></a>&gt;’.</p></li>
+<li><p>The retrieved API code is formatted with the part of the prompt after ‘&lt;<a href="#id58"><span class="problematic" id="id59">|api_input|</span></a>&gt;’.</p></li>
 <li><p>This function is typically used within an Agent’s toolchain for API-related tasks.</p></li>
 </ul>
 </section>
-<section id="id36">
-<h3>Example:<a class="headerlink" href="#id36" title="Link to this heading">¶</a></h3>
+<section id="id39">
+<h3>Example:<a class="headerlink" href="#id39" title="Link to this heading">¶</a></h3>
 <div class="doctest highlight-default notranslate"><div class="highlight"><pre><span></span><span class="gp">&gt;&gt;&gt; </span><span class="n">agent</span> <span class="o">=</span> <span class="n">Agent</span><span class="p">(</span><span class="n">toolchain</span><span class="o">=</span><span class="s2">&quot;responses = get_api(prompt)&quot;</span><span class="p">)</span>
 <span class="gp">&gt;&gt;&gt; </span><span class="n">agent</span><span class="p">(</span><span class="s1">&#39;Draw &lt;|api_input|&gt; A perfectly red apple, 32k HDR, studio lighting&#39;</span><span class="p">)</span>
 <span class="go"># This will retrieve and format API code for image generation based on the given prompt.</span>
@@ -680,8 +731,8 @@ studio lighting’ is used to format the retrieved API code.</p>
 <dt class="sig sig-object py" id="phi_3_vision_mlx.add_code">
 <span class="sig-prename descclassname"><span class="pre">phi_3_vision_mlx.</span></span><span class="sig-name descname"><span class="pre">add_code</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">prompt</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">codes</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#phi_3_vision_mlx.add_code" title="Link to this definition">¶</a></dt>
 <dd><p>Append Python code blocks to a given prompt.</p>
-<section id="id37">
-<h3>Parameters:<a class="headerlink" href="#id37" title="Link to this heading">¶</a></h3>
+<section id="id40">
+<h3>Parameters:<a class="headerlink" href="#id40" title="Link to this heading">¶</a></h3>
 <dl class="simple">
 <dt>prompt<span class="classifier">str</span></dt><dd><p>The original prompt text.</p>
 </dd>
@@ -689,14 +740,108 @@ studio lighting’ is used to format the retrieved API code.</p>
 </dd>
 </dl>
 </section>
-<section id="id38">
-<h3>Returns:<a class="headerlink" href="#id38" title="Link to this heading">¶</a></h3>
+<section id="id41">
+<h3>Returns:<a class="headerlink" href="#id41" title="Link to this heading">¶</a></h3>
 <dl class="simple">
 <dt>str or list of str</dt><dd><p>If codes is None, returns the original prompt.
 Otherwise, returns a list of strings, each containing the original prompt
 followed by a Python code block.</p>
 </dd>
 </dl>
+</section>
+</dd></dl>
+
+</section>
+<section id="add-text">
+<h2>add_text<a class="headerlink" href="#add-text" title="Link to this heading">¶</a></h2>
+<dl class="py function">
+<dt class="sig sig-object py" id="phi_3_vision_mlx.add_text">
+<span class="sig-prename descclassname"><span class="pre">phi_3_vision_mlx.</span></span><span class="sig-name descname"><span class="pre">add_text</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">prompt</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#phi_3_vision_mlx.add_text" title="Link to this definition">¶</a></dt>
+<dd><p>Append context to a given prompt by loading text from a URL or file.</p>
+<p>This function takes a prompt string or a list of prompts, each potentially containing
+a URL or file path after an ‘&#64;’ symbol. It loads the text from the specified source
+and appends it to the corresponding prompt.</p>
+<section id="id42">
+<h3>Parameters:<a class="headerlink" href="#id42" title="Link to this heading">¶</a></h3>
+<dl class="simple">
+<dt>prompt<span class="classifier">str or list of str</span></dt><dd><p>A single prompt string or a list of prompt strings. Each prompt can optionally
+include an ‘&#64;’ followed by a URL or file path to load additional context from.</p>
+</dd>
+</dl>
+</section>
+<section id="id43">
+<h3>Returns:<a class="headerlink" href="#id43" title="Link to this heading">¶</a></h3>
+<dl class="simple">
+<dt>str or list of str</dt><dd><p>If the input is a single string, returns a single processed string.
+If the input is a list, returns a list of processed strings.</p>
+</dd>
+</dl>
+</section>
+<section id="id44">
+<h3>Notes:<a class="headerlink" href="#id44" title="Link to this heading">¶</a></h3>
+<ul class="simple">
+<li><p>The function splits each prompt at the ‘&#64;’ symbol if present.</p></li>
+<li><p>Text after the ‘&#64;’ is treated as a URL or file path to load additional context from.</p></li>
+<li><p>The loaded context is appended to the original prompt.</p></li>
+<li><p>If no ‘&#64;’ is present, the original prompt is returned unchanged.</p></li>
+<li><p>The function uses _load_text() to retrieve content from URLs or files.</p></li>
+</ul>
+</section>
+<section id="id45">
+<h3>Example:<a class="headerlink" href="#id45" title="Link to this heading">¶</a></h3>
+<div class="doctest highlight-default notranslate"><div class="highlight"><pre><span></span><span class="gp">&gt;&gt;&gt; </span><span class="n">add_text</span><span class="p">(</span><span class="s1">&#39;How to inspect API endpoints? @ https://raw.githubusercontent.com/gradio-app/gradio/main/guides/08_gradio-clients-and-lite/01_getting-started-with-the-python-client.md&#39;</span><span class="p">)</span>
+<span class="go"># Returns the original question followed by the content of the specified url address</span>
+</pre></div>
+</div>
+</section>
+</dd></dl>
+
+</section>
+<section id="rag">
+<h2>rag<a class="headerlink" href="#rag" title="Link to this heading">¶</a></h2>
+<dl class="py function">
+<dt class="sig sig-object py" id="phi_3_vision_mlx.rag">
+<span class="sig-prename descclassname"><span class="pre">phi_3_vision_mlx.</span></span><span class="sig-name descname"><span class="pre">rag</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">prompt</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">repo_id</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">'JosefAlbers/sharegpt_python_mlx'</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">n_topk</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">1</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#phi_3_vision_mlx.rag" title="Link to this definition">¶</a></dt>
+<dd><p>Perform Retrieval-Augmented Generation (RAG) on given prompts using a vector database.</p>
+<p>This function takes a prompt or list of prompts, retrieves relevant context from a
+specified dataset using vector similarity search, and combines the retrieved context
+with the original prompts.</p>
+<section id="id46">
+<h3>Parameters:<a class="headerlink" href="#id46" title="Link to this heading">¶</a></h3>
+<dl class="simple">
+<dt>prompt<span class="classifier">str or list of str</span></dt><dd><p>A single prompt string or a list of prompt strings to process.</p>
+</dd>
+<dt>repo_id<span class="classifier">str, optional</span></dt><dd><p>The Hugging Face dataset repository ID to use for context retrieval.
+Default is “JosefAlbers/sharegpt_python_mlx”.</p>
+</dd>
+<dt>n_topk<span class="classifier">int, optional</span></dt><dd><p>The number of top matching contexts to retrieve for each prompt. Default is 1.</p>
+</dd>
+</dl>
+</section>
+<section id="id47">
+<h3>Returns:<a class="headerlink" href="#id47" title="Link to this heading">¶</a></h3>
+<dl class="simple">
+<dt>str or list of str</dt><dd><p>If the input is a single string, returns a single processed string.
+If the input is a list, returns a list of processed strings.
+Each processed string contains the retrieved context followed by the original prompt.</p>
+</dd>
+</dl>
+</section>
+<section id="id48">
+<h3>Notes:<a class="headerlink" href="#id48" title="Link to this heading">¶</a></h3>
+<ul class="simple">
+<li><p>The function uses a Vector Database (VDB) to perform similarity search on the dataset.</p></li>
+<li><p>Retrieved contexts are combined with the original prompts in a specified format.</p></li>
+<li><p>The function is designed to work with the chat_template format used in the phi-3 model.</p></li>
+</ul>
+</section>
+<section id="id49">
+<h3>Example:<a class="headerlink" href="#id49" title="Link to this heading">¶</a></h3>
+<div class="doctest highlight-default notranslate"><div class="highlight"><pre><span></span><span class="gp">&gt;&gt;&gt; </span><span class="n">rag</span><span class="p">(</span><span class="s1">&#39;Comparison of Sortino Ratio for Bitcoin and Ethereum.&#39;</span><span class="p">)</span>
+<span class="go"># Returns a string containing relevant context about Sortino Ratio, Bitcoin, and Ethereum,</span>
+<span class="go"># followed by the original prompt</span>
+</pre></div>
+</div>
 </section>
 </dd></dl>
 

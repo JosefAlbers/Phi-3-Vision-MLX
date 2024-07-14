@@ -6,12 +6,7 @@ Example 1: In-Context Learning Agent
 
 .. code-block:: python
 
-    from phi_3_vision_mlx import _load_text
-
-    # Create a custom tool named 'add_text'
-    def add_text(prompt):
-        prompt, path = prompt.split('@')
-        return f'{_load_text(path)}\n<|end|>\n<|user|>{prompt}'
+    from phi_3_vision_mlx import add_text
 
     # Define the toolchain as a string
     toolchain = """
@@ -41,7 +36,7 @@ Example 2: Retrieval Augmented Coding Agent
         ds = datasets.load_dataset(repo_id, split='train')
         vdb = VDB(ds)
         context = vdb(prompt, n_topk)[0][0]
-        return f'{context}\n<|end|>\n<|user|>Plot: {prompt}'
+        return f'{context}\n<|end|>\n<|user|>\nPlot: {prompt}'
 
     # Define the toolchain
     toolchain_plot = """
