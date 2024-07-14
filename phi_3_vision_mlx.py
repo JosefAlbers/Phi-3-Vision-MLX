@@ -495,15 +495,28 @@ def _choose(model, processor, prompts, appends=None, return_idx=False):
         return scores
     return [choices[i] for i in scores]
 
-def _choose_from(model, processor, prompt, choices='ABCDE'):
+def _choose_from(model, processor, prompt, choices='ABCDE', mute=True):
     def _ord(s):
         return processor([f' {i}' for i in s])['input_ids'][:,-1]
+    if isinstance(prompt, str):
+        _was_prompt_str = True
+    else:
+        _was_prompt_str = False
     options = _ord(choices)
     dict_input = processor(prompt)
     logits, _ = model(**dict_input, max_tokens=0)
     logits = nn.log_softmax(logits[:,-1,:])
     indices = mx.argmax(logits[:, options], axis=-1).tolist()
-    return [choices[i] for i in indices]
+    output = [choices[i] for i in indices]
+    if not mute:
+        if _was_prompt_str:
+            print(output[0])
+        else:
+            for i,o in enumerate(output):
+                print(f'\n< Chosen option for prompt #{i} >\n{o}')
+    if _was_prompt_str:
+        output = output[0]
+    return output
 
 def _preprocess(s):
     for i in ['<|system|>', '<|user|>', '<|end|>']:
@@ -517,10 +530,11 @@ def _already(array_2d, array_1d):
     return ~mx.all(array_2d[:, -len(array_1d):] == array_1d, axis=1)
 
 def _constrain(model, processor, prompt, constraints, return_full_text=False, mute=False):
-    _was_prompt_str = False
     if isinstance(prompt, str):
         _was_prompt_str = True
         prompt = [prompt]
+    else:
+        _was_prompt_str = False
     prompt = [_preprocess(s) for s in prompt]
     len_ps = [len(p) for p in prompt]
     for constraint in constraints:
@@ -572,11 +586,11 @@ def _constrain(model, processor, prompt, constraints, return_full_text=False, mu
     if not return_full_text:
         output = [o[l:] for o,l in zip(output,len_ps)]
     if not mute:
-        if len(output) == 1:
+        if _was_prompt_str:
             print(output[0])
         else:
             for i,o in enumerate(output):
-                print(f'\n< Generated text for prompt #{i} >\n{o}')
+                print(f'\n< Constrained text for prompt #{i} >\n{o}')
     if _was_prompt_str:
         output = output[0]
     return output
@@ -595,10 +609,11 @@ def _beam(model, processor, prompt, constraints, return_full_text=False, mute=Fa
         _argmax_beam = mx.argmax(_beam_score, axis=-1)
         token = _arg_beam[mx.arange(len(_argmax_beam)), _argmax_beam]
         return token, cache
-    _was_prompt_str = False
     if isinstance(prompt, str):
         _was_prompt_str = True
         prompt = [prompt]
+    else:
+        _was_prompt_str = False
     prompt = [_preprocess(s) for s in prompt]
     len_ps = [len(p) for p in prompt]
     for constraint in constraints:
@@ -650,7 +665,7 @@ def _beam(model, processor, prompt, constraints, return_full_text=False, mute=Fa
     if not return_full_text:
         output = [o[l:] for o,l in zip(output,len_ps)]
     if not mute:
-        if len(output) == 1:
+        if _was_prompt_str:
             print(output[0])
         else:
             for i,o in enumerate(output):
@@ -658,6 +673,120 @@ def _beam(model, processor, prompt, constraints, return_full_text=False, mute=Fa
     if _was_prompt_str:
         output = output[0]
     return output
+
+def add_code(prompt, codes):
+    """
+    Append Python code blocks to a given prompt.
+
+    Parameters:
+    -----------
+    prompt : str
+        The original prompt text.
+    codes : list of str or None
+        A list of Python code strings to be appended to the prompt.
+
+    Returns:
+    --------
+    str or list of str
+        If codes is None, returns the original prompt.
+        Otherwise, returns a list of strings, each containing the original prompt
+        followed by a Python code block.
+    """
+    return prompt if codes is None else [f'{prompt}\n\n```python\n{code}\n```\n' for code in codes]
+
+def add_text(prompt):
+    """
+    Append context to a given prompt by loading text from a URL or file.
+
+    This function takes a prompt string or a list of prompts, each potentially containing
+    a URL or file path after an '@' symbol. It loads the text from the specified source
+    and appends it to the corresponding prompt.
+
+    Parameters:
+    -----------
+    prompt : str or list of str
+        A single prompt string or a list of prompt strings. Each prompt can optionally
+        include an '@' followed by a URL or file path to load additional context from.
+
+    Returns:
+    --------
+    str or list of str
+        If the input is a single string, returns a single processed string.
+        If the input is a list, returns a list of processed strings.
+
+    Notes:
+    ------
+    - The function splits each prompt at the '@' symbol if present.
+    - Text after the '@' is treated as a URL or file path to load additional context from.
+    - The loaded context is appended to the original prompt.
+    - If no '@' is present, the original prompt is returned unchanged.
+    - The function uses _load_text() to retrieve content from URLs or files.
+
+    Example:
+    --------
+    >>> add_text('How to inspect API endpoints? @ https://raw.githubusercontent.com/gradio-app/gradio/main/guides/08_gradio-clients-and-lite/01_getting-started-with-the-python-client.md')
+    # Returns the original question followed by the content of the specified url address
+    """
+    if isinstance(prompt, str):
+        prompt = [prompt]
+        _was_prompt_str = True
+    else:
+        _was_prompt_str = False
+    question_context = [p.split('@') for p in prompt]
+    result = [f'{_load_text(context.strip())}\n<|end|>\n<|user|>\n{question.strip()}' for question, context in question_context]
+    if _was_prompt_str:
+        return result[0]
+    return result
+
+def rag(prompt, repo_id="JosefAlbers/sharegpt_python_mlx", n_topk=1):
+    """
+    Perform Retrieval-Augmented Generation (RAG) on given prompts using a vector database.
+
+    This function takes a prompt or list of prompts, retrieves relevant context from a
+    specified dataset using vector similarity search, and combines the retrieved context
+    with the original prompts.
+
+    Parameters:
+    -----------
+    prompt : str or list of str
+        A single prompt string or a list of prompt strings to process.
+    repo_id : str, optional
+        The Hugging Face dataset repository ID to use for context retrieval.
+        Default is "JosefAlbers/sharegpt_python_mlx".
+    n_topk : int, optional
+        The number of top matching contexts to retrieve for each prompt. Default is 1.
+
+    Returns:
+    --------
+    str or list of str
+        If the input is a single string, returns a single processed string.
+        If the input is a list, returns a list of processed strings.
+        Each processed string contains the retrieved context followed by the original prompt.
+
+    Notes:
+    ------
+    - The function uses a Vector Database (VDB) to perform similarity search on the dataset.
+    - Retrieved contexts are combined with the original prompts in a specified format.
+    - The function is designed to work with the chat_template format used in the phi-3 model.
+
+    Example:
+    --------
+    >>> rag('Comparison of Sortino Ratio for Bitcoin and Ethereum.')
+    # Returns a string containing relevant context about Sortino Ratio, Bitcoin, and Ethereum,
+    # followed by the original prompt
+    """
+    if isinstance(prompt, str):
+        prompt = [prompt]
+        _was_prompt_str = True
+    else:
+        _was_prompt_str = False
+    ds = datasets.load_dataset(repo_id, split='train')
+    vdb = VDB(ds)
+    context = vdb(prompt, n_topk)
+    result = [f'{"\n<|end|>\n".join(context[i][:n_topk])}\n<|end|>\n<|user|>\n{prompt[i]}' for i in range(len(prompt))]
+    if _was_prompt_str:
+        return result[0]
+    return result
 
 def get_api(prompt, n_topk=1, verbose=True):
     """
@@ -699,8 +828,8 @@ def get_api(prompt, n_topk=1, verbose=True):
     In this example, 'Draw' is used for the API search, and 'A perfectly red apple, 32k HDR,
     studio lighting' is used to format the retrieved API code.
     """
-    vdb = VDB()
     prompt = [prompt] if isinstance(prompt, str) else prompt
+    vdb = VDB()
     codes = vdb([p.split('<|api_input|>')[0] for p in prompt])
     codes = [code.format(prompt=prompt[i].split('<|api_input|>')[1].strip()) for i, sublist in enumerate(codes) for code in sublist]
     if verbose:
@@ -708,26 +837,6 @@ def get_api(prompt, n_topk=1, verbose=True):
         for code in codes:
             print(code)
     return codes
-
-def add_code(prompt, codes):
-    """
-    Append Python code blocks to a given prompt.
-
-    Parameters:
-    -----------
-    prompt : str
-        The original prompt text.
-    codes : list of str or None
-        A list of Python code strings to be appended to the prompt.
-
-    Returns:
-    --------
-    str or list of str
-        If codes is None, returns the original prompt.
-        Otherwise, returns a list of strings, each containing the original prompt
-        followed by a Python code block.
-    """
-    return prompt if codes is None else [f'{prompt}\n\n```python\n{code}\n```\n' for code in codes]
 
 def chat_ui(agent=None):
     """
@@ -802,7 +911,6 @@ def chat_ui(agent=None):
         if message["text"] is not None:
             history.append((message["text"], None))
         return history, gr.MultimodalTextbox(value=None, interactive=False)
-
     def bot(history):
         def _get_input(history):
             return history[-1][0], [i[0][0] for i in history[agent.user_since:-1]] if agent.user_since+1 < len(history) else None
@@ -822,11 +930,9 @@ def chat_ui(agent=None):
                     history.append((None, (file,)))
         agent.user_since = len(history)
         return history
-
     def reset():
         agent.end()
         return []
-
     with gr.Blocks(css="footer{display:none !important}") as demo:
         chatbot = gr.Chatbot(
             [],
@@ -834,21 +940,16 @@ def chat_ui(agent=None):
             bubble_full_width=False,
             height='80vh'
         )
-
         chat_input = gr.MultimodalTextbox(interactive=True, file_types=["image"], placeholder="Enter message or upload file...", show_label=False)
-
         close_btn = gr.Button("Reset", variant="stop")
-
         chat_msg = chat_input.submit(add_message, [chatbot, chat_input], [chatbot, chat_input])
         bot_msg = chat_msg.then(bot, chatbot, chatbot, api_name="bot_response")
         bot_msg.then(lambda: gr.MultimodalTextbox(interactive=True), None, [chat_input])
-
         close_btn.click(reset, None, chatbot)
-
     demo.queue()
     demo.launch(inbrowser=True, inline=True)
 
-def train_lora(model_path=PATH_QUANTIZED_PHI3_BLIND, adapter_path=None, lora_targets=["self_attn.qkv_proj", "self_attn.o_proj"], lora_layers=1, lora_rank=1, epochs=1, batch_size=1, take=10, lr=1e-4, warmup=.5, mask_ratios=None, dataset_path="JosefAlbers/akemiH_MedQA_Reason"):
+def train_lora(model_path=PATH_QUANTIZED_PHI3_BLIND, adapter_path=None, lora_targets=["self_attn.qkv_proj"], lora_layers=1, lora_rank=1, epochs=1, batch_size=1, take=10, lr=1e-4, warmup=.5, mask_ratios=None, dataset_path="JosefAlbers/akemiH_MedQA_Reason"):
     """
     Train a LoRA (Low-Rank Adaptation) model using the specified parameters.
 
@@ -906,7 +1007,6 @@ def train_lora(model_path=PATH_QUANTIZED_PHI3_BLIND, adapter_path=None, lora_tar
         prompts = [f"<|user|>\n{q}<|end|>\n<|assistant|>\n{s}<|end|>" for q,s in zip(questions, summaries)]
         example['prompts'] = prompts
         return example
-
     def _mask(batch):
         if mask_ratios is None:
             return batch, mx.ones(len(batch['input_ids']))
@@ -935,7 +1035,6 @@ def train_lora(model_path=PATH_QUANTIZED_PHI3_BLIND, adapter_path=None, lora_tar
                 new_batch['mask'].append(masked_attention_mask)
                 loss_scales.append(10.**(-10.*ratio))
         return new_batch, mx.array(loss_scales)
-
     def _get_batch(indices):
         batch = [list_prompts[i] for i in indices]
         batch = processor(batch)
@@ -948,7 +1047,6 @@ def train_lora(model_path=PATH_QUANTIZED_PHI3_BLIND, adapter_path=None, lora_tar
         targets = targets[:, start_ce:]
         loss_masks = loss_masks[:, start_ce:]
         return inputs, targets, loss_masks, start_ce, loss_scales
-
     def _loss(model, batch):
         inputs, targets, loss_masks, start_ce, loss_scales = batch
         logit_outputs, _ = model(**inputs)
@@ -958,7 +1056,6 @@ def train_lora(model_path=PATH_QUANTIZED_PHI3_BLIND, adapter_path=None, lora_tar
         loss_ce = loss_ce.sum(axis=1) / loss_masks.sum(axis = 1)
         loss_ce = (loss_ce * loss_scales).sum() # / targets.shape[0]
         return loss_ce
-
     def _set_lora(model_path, adapter_path, lora_targets, lora_layers, lora_rank):
         lora_cfg = {
             "model_path": str(model_path),
@@ -968,11 +1065,9 @@ def train_lora(model_path=PATH_QUANTIZED_PHI3_BLIND, adapter_path=None, lora_tar
             "lora_parameters": {"rank": lora_rank, "alpha": lora_rank, "dropout": 0.0, "scale": 1.0},
         }
         return lora_cfg
-
     def _get_lr_schedule(lr, steps, warmup):
         n_warmup = int(steps*warmup)
         return mx.concatenate([mx.linspace(1e-6, lr, n_warmup), mx.linspace(lr, 1e-6, steps - n_warmup + 1)[1:]])
-
     if adapter_path is None:
         adapter_path = _get_adapter_path(model_path)
     model, processor = _load(model_path, return_mx=False)
@@ -1004,7 +1099,7 @@ def train_lora(model_path=PATH_QUANTIZED_PHI3_BLIND, adapter_path=None, lora_tar
     del model
     del processor
 
-def test_lora(model_path=PATH_QUANTIZED_PHI3_BLIND, adapter_path=True, dataset_path="JosefAlbers/akemiH_MedQA_Reason", take=(0, 10), batch_size=10):
+def test_lora(model_path=PATH_QUANTIZED_PHI3_BLIND, adapter_path=True, dataset_path="JosefAlbers/akemiH_MedQA_Reason", take=(0, 10), batch_size=10, test_result_path='test_result.csv'):
     """
     Test a LoRA (Low-Rank Adaptation) model on a given dataset using various generation methods.
 
@@ -1061,20 +1156,19 @@ def test_lora(model_path=PATH_QUANTIZED_PHI3_BLIND, adapter_path=True, dataset_p
         else:
             answers = attempts
         example[a_col] = answers
+        _bar = '*'*8
         if c_col is not None and verbose is True:
-            print(f'*** COMPARE ***')
+            print(f'\n\n{_bar} {a_col} {_bar}\n')
             for i,j,k,l in zip(questions, attempts, answers, example[c_col]):
                 print('- PROMPT:', i)
                 print('- OUTPUT:', j)
                 if a_format:
                     print('- ANSWER:', k)
-                print('-  TRUTH:', l.strip().split('\n', 1)[0])
+                print('- TRUTH: ', l.strip().split('\n', 1)[0])
                 print('---')
         return example
-
     def _map(ds, map_args):
         return ds.map(_try, batched=True, batch_size=batch_size, fn_kwargs=map_args, load_from_cache_file=False, new_fingerprint=map_args['a_col'])
-
     if adapter_path is True:
         adapter_path = _get_adapter_path(model_path)
     model, processor = _load(model_path=model_path, adapter_path=adapter_path)
@@ -1088,7 +1182,7 @@ def test_lora(model_path=PATH_QUANTIZED_PHI3_BLIND, adapter_path=True, dataset_p
             'q_format':None,
             'fxn':partial(_generate, model=model, processor=processor, max_tokens=30, verbose=False, mute=True),
             'a_format':None,
-            'a_col':'recall',
+            'a_col':'summary_attempt',
             'c_col':'summary',
             'verbose':True
         },
@@ -1096,9 +1190,9 @@ def test_lora(model_path=PATH_QUANTIZED_PHI3_BLIND, adapter_path=True, dataset_p
             'q_col':'input',
             'q_until':None,
             'q_format':'\nThe correct answer is',
-            'fxn':partial(_choose_from, model=model, processor=processor, choices='ABCDE'),
+            'fxn':partial(_choose_from, model=model, processor=processor, choices='ABCDE', mute=True),
             'a_format':None,
-            'a_col':'attempt',
+            'a_col':'choice_attempt',
             'c_col':'output',
             'verbose':True,
         },
@@ -1125,12 +1219,13 @@ def test_lora(model_path=PATH_QUANTIZED_PHI3_BLIND, adapter_path=True, dataset_p
     ]
     for i in list_args:
         ds = _map(ds, i)
-    num_chosen = len(ds.filter(lambda x: x["output"] == x["attempt"]))
+    num_chosen = len(ds.filter(lambda x: x["output"] == x["choice_attempt"]))
     print(f'Score w/ _choose_from(): {num_chosen/len(ds)}({num_chosen}/{len(ds)})')
     num_constr = len(ds.filter(lambda x: x["output"] == x["constrained_attempt"]))
     print(f'Score w/ _constrain():   {num_constr/len(ds)}({num_constr}/{len(ds)})')
     num_beamed = len(ds.filter(lambda x: x["output"] == x["beamed_attempt"]))
     print(f'Score w/ _beam():        {num_beamed/len(ds)}({num_beamed}/{len(ds)})')
+    ds.to_csv(test_result_path)
     del model
     del processor
 
@@ -1330,6 +1425,53 @@ def generate(prompt, images=None, preload=None, blind_model=False, quantize_mode
         preload = load(blind_model=blind_model, quantize_model=quantize_model, quantize_cache=quantize_cache, use_adapter=use_adapter)
     return _generate(*preload, *_apply_chat_template(prompt, images, verbose, apply_chat_template), max_tokens=max_tokens, verbose=verbose, return_tps=return_tps, early_stop=early_stop, stream=stream)
 
+def choose(prompt, choices='ABCDE', images=None, preload=None, blind_model=False, quantize_model=False, quantize_cache=False, use_adapter=False, apply_chat_template=True):
+    """
+    Choose the best option from a set of choices for a given prompt.
+
+    It selects the most appropriate answer from a set of choices based on the input prompt.
+
+    Parameters:
+    -----------
+    prompt : str or list of str
+        The input prompt(s) for which to choose an answer.
+    choices : str, optional
+        A string containing the possible choices. Default is 'ABCDE'.
+    images : list or None, optional
+        List of image inputs for multimodal models. Default is None.
+    preload : tuple or None, optional
+        A tuple containing (model, processor) if already loaded. If None, the function will load
+        the model and processor based on the provided configuration. Default is None.
+    blind_model : bool, optional
+        If True, uses a model without vision capabilities. Default is False.
+    quantize_model : bool, optional
+        If True, uses a quantized version of the model for reduced memory usage. Default is False.
+    quantize_cache : bool, optional
+        If True, uses cache quantization for improved memory efficiency. Default is False.
+    use_adapter : bool, optional
+        If True, uses a LoRA adapter with the model for fine-tuned behavior. Default is False.
+    apply_chat_template : bool, optional
+        If True, applies a chat template to the prompt before processing. Default is True.
+
+    Returns:
+    --------
+    str or list of str
+        The chosen answer(s) from the provided choices. Returns a single string if
+        the input prompt was a string, otherwise returns a list of strings.
+
+    Example:
+    --------
+    >>> prompt = "What is the capital of France? A: London B: Berlin C: Paris D: Madrid E: Rome"
+    >>> result = choose(prompt)
+    >>> print(result)
+    'C'
+    """
+    if preload is None:
+        preload = load(blind_model=blind_model, quantize_model=quantize_model, quantize_cache=quantize_cache, use_adapter=use_adapter)
+    if apply_chat_template:
+        prompt, _ = _apply_chat_template(prompt, images, False)
+    return _choose_from(model, processor, prompt, choices)
+
 def constrain(prompt, constraints=[(30, ' The correct answer is'), (10, 'X.')], images=None, preload=None, blind_model=False, quantize_model=False, quantize_cache=False, use_adapter=False, apply_chat_template=True, use_beam=False):
     """
     Perform constrained decoding on the given prompt using specified constraints.
@@ -1383,14 +1525,8 @@ def constrain(prompt, constraints=[(30, ' The correct answer is'), (10, 'X.')], 
     >>> result = constrain(prompt, constraints)
     >>> print(result)
     """
-    # constrain ("Write a Python function to calculate the Fibonacci sequence up to a given number n.", [(100, "\n```python\n"), (100, " return "), (200, "\n```")])
-    # prompts = [
-    #     "A 20-year-old woman presents with menorrhagia for the past several years. She says that her menses “have always been heavy”, and she has experienced easy bruising for as long as she can remember. Family history is significant for her mother, who had similar problems with bruising easily. The patient's vital signs include: heart rate 98/min, respiratory rate 14/min, temperature 36.1°C (96.9°F), and blood pressure 110/87 mm Hg. Physical examination is unremarkable. Laboratory tests show the following: platelet count 200,000/mm3, PT 12 seconds, and PTT 43 seconds. Which of the following is the most likely cause of this patient’s symptoms? A: Factor V Leiden B: Hemophilia A C: Lupus anticoagulant D: Protein C deficiency E: Von Willebrand disease",
-    #     "A 25-year-old primigravida presents to her physician for a routine prenatal visit. She is at 34 weeks gestation, as confirmed by an ultrasound examination. She has no complaints, but notes that the new shoes she bought 2 weeks ago do not fit anymore. The course of her pregnancy has been uneventful and she has been compliant with the recommended prenatal care. Her medical history is unremarkable. She has a 15-pound weight gain since the last visit 3 weeks ago. Her vital signs are as follows: blood pressure, 148/90 mm Hg; heart rate, 88/min; respiratory rate, 16/min; and temperature, 36.6℃ (97.9℉). The blood pressure on repeat assessment 4 hours later is 151/90 mm Hg. The fetal heart rate is 151/min. The physical examination is significant for 2+ pitting edema of the lower extremity. Which of the following tests o should confirm the probable condition of this patient? A: Bilirubin assessment B: Coagulation studies C: Hematocrit assessment D: Leukocyte count with differential E: 24-hour urine protein"]
-    # constrain(prompts, constraints=[(30, ' The correct answer is'), (10, 'X.')], blind_model=True, quantize_model=True)
     if preload is None:
-        model, processor = load(blind_model=blind_model, quantize_model=quantize_model, quantize_cache=quantize_cache, use_adapter=use_adapter)
-        preload = model, processor
+        preload = load(blind_model=blind_model, quantize_model=quantize_model, quantize_cache=quantize_cache, use_adapter=use_adapter)
     if apply_chat_template:
         prompt = _apply_chat_template(prompt, None, False)[0]
     if use_beam:

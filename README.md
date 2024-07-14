@@ -66,7 +66,7 @@ generate("Describe the water cycle.", quantize_model=True)
 generate("Explain quantum computing.", quantize_cache=True)
 ```
 
-### Structured Generation Using Constrained Decoding (WIP)
+### Constrained Decoding (WIP)
 
 The `constrain` function allows for structured generation, which can be useful for tasks like code generation, function calling, chain-of-thought prompting, or multiple-choice question answering.
 
@@ -104,12 +104,36 @@ The most likely cause of this patient's menorrhagia and easy bruising is E: Von 
 
 < Generated text for prompt #1 >
 The patient's hypertension, edema, and weight gain are concerning for preeclampsia. The correct answer is E: 24-hour urine protein.
-(phi) phi %
+```
+
+### Multiple Choice Selection
+
+The `choose` function provides a straightforward way to select the best option from a set of choices for a given prompt. This is particularly useful for multiple-choice questions or decision-making scenarios.
+
+```python
+from phi_3_vision_mlx import choose
+
+prompt = "What is the capital of France? A: London B: Berlin C: Paris D: Madrid E: Rome"
+result = choose(prompt)
+print(result)  # Output: 'C'
+
+# Using with custom choices
+custom_prompt = "Which color is associated with stopping at traffic lights? R: Red Y: Yellow G: Green"
+custom_result = choose(custom_prompt, choices='RYG')
+print(custom_result)  # Output: 'R'
+
+# Batch processing
+prompts = [
+    "What is the largest planet in our solar system? A: Earth B: Mars C: Jupiter D: Saturn",
+    "Which element has the chemical symbol 'O'? A: Osmium B: Oxygen C: Gold D: Silver"
+]
+batch_results = choose(prompts)
+print(batch_results)  # Output: ['C', 'B']
 ```
 
 ### (Q)LoRA Fine-tuning
 
-Training a (Q)LoRA Adapter
+Training a LoRA Adapter
 
 ```python
 from phi_3_vision_mlx import train_lora
@@ -126,7 +150,7 @@ train_lora(
 
 ![Alt text](https://raw.githubusercontent.com/JosefAlbers/Phi-3-Vision-MLX/main/assets/train_log.png)
 
-Generating Text with (Q)LoRA
+Generating Text with LoRA
 
 ```python
 generate("Describe the potential applications of CRISPR gene editing in medicine.",
@@ -135,7 +159,7 @@ generate("Describe the potential applications of CRISPR gene editing in medicine
     use_adapter=True)
 ```
 
-Comparing (Q)LoRA Adapters
+Comparing LoRA Adapters
 
 ```python
 from phi_3_vision_mlx import test_lora
@@ -206,12 +230,7 @@ agent.end()
 ### Example 1. In-Context Learning Agent
 
 ```python
-from phi_3_vision_mlx import _load_text
-
-# Create a custom tool named 'add_text'
-def add_text(prompt):
-    prompt, path = prompt.split('@')
-    return f'{_load_text(path)}\n<|end|>\n<|user|>{prompt}'
+from phi_3_vision_mlx import add_text
 
 # Define the toolchain as a string
 toolchain = """
@@ -240,7 +259,7 @@ def rag(prompt, repo_id="JosefAlbers/sharegpt_python_mlx", n_topk=1):
     ds = datasets.load_dataset(repo_id, split='train')
     vdb = VDB(ds)
     context = vdb(prompt, n_topk)[0][0]
-    return f'{context}\n<|end|>\n<|user|>Plot: {prompt}'
+    return f'{context}\n<|end|>\n<|user|>\nPlot: {prompt}'
 
 # Define the toolchain
 toolchain_plot = """
