@@ -462,22 +462,21 @@ def _get_adapter_path(model_path):
     print(f'{PATH_ADAPTERS}/{Path(model_path).name}')
     return f'{PATH_ADAPTERS}/{Path(model_path).name}'
 
-def _score(model, processor, prompts):
-    dict_input = processor(prompts)
-    logits, _ = model(**dict_input, max_tokens=0)
-    logits = nn.log_softmax(logits)
-    input_ids = dict_input['input_ids']
-    mask = dict_input['mask']
-    batch_size, seq_length, vocab_size = logits.shape
-    row_indices = mx.arange(batch_size)[:, None]
-    col_indices = mx.arange(seq_length - 1)[None, :]
-    token_indices = input_ids[:, 1:]
-    next_token_logits = logits[row_indices, col_indices, token_indices]
-    masked_logits = next_token_logits * mask[:, 1:]
-    logit_sums = masked_logits.sum(axis=1)
-    return logit_sums
-
 def _choose(model, processor, prompts, appends=None, return_idx=False):
+    def _process_and_score(model, processor, prompts):
+        dict_input = processor(prompts)
+        logits, _ = model(**dict_input, max_tokens=0)
+        logits = nn.log_softmax(logits)
+        input_ids = dict_input['input_ids']
+        mask = dict_input['mask']
+        batch_size, seq_length, vocab_size = logits.shape
+        row_indices = mx.arange(batch_size)[:, None]
+        col_indices = mx.arange(seq_length - 1)[None, :]
+        token_indices = input_ids[:, 1:]
+        next_token_logits = logits[row_indices, col_indices, token_indices]
+        masked_logits = next_token_logits * mask[:, 1:]
+        logit_sums = masked_logits.sum(axis=1)
+        return logit_sums
     if isinstance(appends, list):
         prompts = [prompt + str(a) for prompt in prompts for a in appends]
     scores = _score(model, processor, prompts)
@@ -495,7 +494,7 @@ def _choose(model, processor, prompts, appends=None, return_idx=False):
         return scores
     return [choices[i] for i in scores]
 
-def _choose_from(model, processor, prompt, choices='ABCDE', mute=True):
+def _choose_from(model, processor, prompt, choices='ABCDE', mute=False):
     def _ord(s):
         return processor([f' {i}' for i in s])['input_ids'][:,-1]
     if isinstance(prompt, str):
@@ -595,8 +594,20 @@ def _constrain(model, processor, prompt, constraints, return_full_text=False, mu
         output = output[0]
     return output
 
+def _score(input_ids, mask, logits):
+    batch_size, seq_length, vocab_size = logits.shape
+    row_indices = mx.arange(batch_size)[:, None]
+    col_indices = mx.arange(seq_length - 1)[None, :]
+    token_indices = input_ids[:, 1:]
+    next_token_logits = logits[row_indices, col_indices, token_indices]
+    masked_logits = next_token_logits * mask[:, :-1]
+    logit_sums = masked_logits.sum(axis=1)
+    mask_counts = mask[:, :-1].sum(axis=1)
+    return logit_sums, mask_counts
+
 def _beam(model, processor, prompt, constraints, return_full_text=False, mute=False):
     def _get_beam(logits, cache, id_constraint, beam_idx=0, n_beam=3):
+        token = mx.argmax(logits[:, 0, :], axis=-1)
         _B, _S, _V = logits.shape
         _arg_beam = mx.argpartition(-logits[:, beam_idx, :], kth=n_beam, axis=-1)[:,:n_beam]
         _beam = _arg_beam.reshape(-1)[:,None]
@@ -607,8 +618,8 @@ def _beam(model, processor, prompt, constraints, return_full_text=False, mute=Fa
         _beam_score = mx.concatenate([logits[mx.arange(_arg_beam.shape[0])[:,None],beam_idx,_arg_beam].reshape(-1)[:,None], _beam_score], axis=1).mean(axis=1)
         _beam_score = _beam_score.reshape(-1,n_beam)
         _argmax_beam = mx.argmax(_beam_score, axis=-1)
-        token = _arg_beam[mx.arange(len(_argmax_beam)), _argmax_beam]
-        return token, cache
+        beam_token = _arg_beam[mx.arange(len(_argmax_beam)), _argmax_beam]
+        return token, beam_token, cache
     if isinstance(prompt, str):
         _was_prompt_str = True
         prompt = [prompt]
@@ -623,13 +634,14 @@ def _beam(model, processor, prompt, constraints, return_full_text=False, mute=Fa
         logits, cache = model(**dict_input, max_tokens=constraint[0] + id_constraint.shape[0]+10)
         logits = nn.log_softmax(logits, axis=-1)
         token = mx.argmax(logits[:, -1, :], axis=-1)[:,None]
+        _sum_init, _mask_init = _score(dict_input['input_ids'], dict_input['mask'], logits)
         running_score = mx.max(logits[:, -1, :], axis=-1)[:,None]
         _score_0 = logits[:, -1, id_constraint[0]]
         tiled_id_constraint = mx.tile(id_constraint, (token.shape[0], 1))
         logits_rest, cache = model(input_ids=tiled_id_constraint, cache=cache, advance_offset=0)
         logits_rest = nn.log_softmax(logits_rest, axis=-1)
         _score_1 = logits_rest[mx.arange(tiled_id_constraint.shape[0])[:,None], mx.arange(tiled_id_constraint.shape[1]-1)[None,:], tiled_id_constraint[:,1:]]
-        score_sofar = mx.concatenate([_score_0[:,None], _score_1], axis = 1).mean(axis=1)
+        score_sofar = mx.concatenate([_sum_init[:,None], _score_0[:,None], _score_1], axis=1).sum(axis=1) / (_mask_init + id_constraint.shape[0])
         synth_sofar = tiled_id_constraint
         synth_pad = mx.tile(mx.array([ID_EOS]), (tiled_id_constraint.shape[0], 1))
         synth = tiled_id_constraint
@@ -641,12 +653,9 @@ def _beam(model, processor, prompt, constraints, return_full_text=False, mute=Fa
             token_plus = mx.concatenate([token, tiled_id_constraint], axis=1)
             logits, cache = model(input_ids=token_plus, cache=cache, advance_offset=1)
             logits = nn.log_softmax(logits)
-            token, cache = _get_beam(logits, cache, id_constraint)
-            finished_rows *= token != ID_EOS
+            token, beam_token, cache = _get_beam(logits, cache, id_constraint)
             _synth_score = logits[mx.arange(tiled_id_constraint.shape[0])[:,None], mx.arange(tiled_id_constraint.shape[1])[None,:], tiled_id_constraint]
             score = mx.concatenate([running_score, _synth_score], axis=1).mean(axis=1)
-            running_score = mx.concatenate([running_score, logits[mx.arange(token.shape[0]),0,token][:,None]], axis=1)
-            token = token[:,None]
             synth_sofar = mx.concatenate([synth_sofar, synth_pad], axis=1)
             finished_rows *= _already(mx.concatenate(tokens, axis=1), id_constraint)
             if finished_rows.sum() < 1:
@@ -655,6 +664,10 @@ def _beam(model, processor, prompt, constraints, return_full_text=False, mute=Fa
             rows_to_update *= finished_rows
             synth_sofar = mx.where(rows_to_update[:,None], synth, synth_sofar)
             score_sofar = mx.where(rows_to_update, score, score_sofar)
+            token = mx.where(rows_to_update, beam_token, token)
+            running_score = mx.concatenate([running_score, logits[mx.arange(token.shape[0]),0,token][:,None]], axis=1)
+            finished_rows *= token != ID_EOS
+            token = token[:,None]
         output = mx.concatenate([dict_input['input_ids'], synth_sofar], axis=1).tolist()
         S = dict_input['input_ids'].shape[1]
         output = [(i[:i.index(ID_EOS,S)] if ID_EOS in i[S:] else i) for i in output]
@@ -1200,7 +1213,7 @@ def test_lora(model_path=PATH_QUANTIZED_PHI3_BLIND, adapter_path=True, dataset_p
             'q_col':'input',
             'q_until':None,
             'q_format':'',
-            'fxn':partial(_constrain, model=model, processor=processor, constraints=[(30, ' The correct answer is'), (10, 'X.')], mute=True),
+            'fxn':partial(_constrain, model=model, processor=processor, constraints=[(100, ' The correct answer is'), (10, 'X.')], mute=True),
             'a_format':'The correct answer is ',
             'a_col':'constrained_attempt',
             'c_col':'output',
@@ -1210,7 +1223,7 @@ def test_lora(model_path=PATH_QUANTIZED_PHI3_BLIND, adapter_path=True, dataset_p
             'q_col':'input',
             'q_until':None,
             'q_format':'',
-            'fxn':partial(_beam, model=model, processor=processor, constraints=[(30, ' The correct answer is'), (10, 'X.')], mute=True),
+            'fxn':partial(_beam, model=model, processor=processor, constraints=[(100, ' The correct answer is'), (10, 'X.')], mute=True),
             'a_format':'The correct answer is ',
             'a_col':'beamed_attempt',
             'c_col':'output',
@@ -1425,7 +1438,7 @@ def generate(prompt, images=None, preload=None, blind_model=False, quantize_mode
         preload = load(blind_model=blind_model, quantize_model=quantize_model, quantize_cache=quantize_cache, use_adapter=use_adapter)
     return _generate(*preload, *_apply_chat_template(prompt, images, verbose, apply_chat_template), max_tokens=max_tokens, verbose=verbose, return_tps=return_tps, early_stop=early_stop, stream=stream)
 
-def choose(prompt, choices='ABCDE', images=None, preload=None, blind_model=False, quantize_model=False, quantize_cache=False, use_adapter=False, apply_chat_template=True):
+def choose(prompt, choices='ABCDE', images=None, preload=None, blind_model=False, quantize_model=False, quantize_cache=False, use_adapter=False, verbose=True, apply_chat_template=True):
     """
     Choose the best option from a set of choices for a given prompt.
 
@@ -1469,10 +1482,10 @@ def choose(prompt, choices='ABCDE', images=None, preload=None, blind_model=False
     if preload is None:
         preload = load(blind_model=blind_model, quantize_model=quantize_model, quantize_cache=quantize_cache, use_adapter=use_adapter)
     if apply_chat_template:
-        prompt, _ = _apply_chat_template(prompt, images, False)
-    return _choose_from(model, processor, prompt, choices)
+        prompt, _ = _apply_chat_template(prompt, images, verbose)
+    return _choose_from(*preload, prompt=prompt, choices=choices)
 
-def constrain(prompt, constraints=[(30, ' The correct answer is'), (10, 'X.')], images=None, preload=None, blind_model=False, quantize_model=False, quantize_cache=False, use_adapter=False, apply_chat_template=True, use_beam=False):
+def constrain(prompt, constraints=[(30, ' The correct answer is'), (10, 'X.')], images=None, preload=None, blind_model=False, quantize_model=False, quantize_cache=False, use_adapter=False, verbose=True, apply_chat_template=True, use_beam=False):
     """
     Perform constrained decoding on the given prompt using specified constraints.
 
@@ -1528,7 +1541,7 @@ def constrain(prompt, constraints=[(30, ' The correct answer is'), (10, 'X.')], 
     if preload is None:
         preload = load(blind_model=blind_model, quantize_model=quantize_model, quantize_cache=quantize_cache, use_adapter=use_adapter)
     if apply_chat_template:
-        prompt = _apply_chat_template(prompt, None, False)[0]
+        prompt = _apply_chat_template(prompt, None, verbose)[0]
     if use_beam:
         return _beam(*preload, prompt=prompt, constraints=constraints)
     return _constrain(*preload, prompt=prompt, constraints=constraints)
