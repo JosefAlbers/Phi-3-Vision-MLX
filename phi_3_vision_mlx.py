@@ -46,7 +46,7 @@ class Streamer:
     def __init__(self, processor, stream, mute):
         self.tokenizer = processor.tokenizer
         self.mute = mute
-        self.stream = stream
+        self.stream = stream and mute
         self.list_tokens = []
         self.idx_sofar = 0
     def __call__(self, token):
@@ -462,38 +462,6 @@ def _get_adapter_path(model_path):
     print(f'{PATH_ADAPTERS}/{Path(model_path).name}')
     return f'{PATH_ADAPTERS}/{Path(model_path).name}'
 
-def _choose(model, processor, prompts, appends=None, return_idx=False):
-    def _process_and_score(model, processor, prompts):
-        dict_input = processor(prompts)
-        logits, _ = model(**dict_input, max_tokens=0)
-        logits = nn.log_softmax(logits)
-        input_ids = dict_input['input_ids']
-        mask = dict_input['mask']
-        batch_size, seq_length, vocab_size = logits.shape
-        row_indices = mx.arange(batch_size)[:, None]
-        col_indices = mx.arange(seq_length - 1)[None, :]
-        token_indices = input_ids[:, 1:]
-        next_token_logits = logits[row_indices, col_indices, token_indices]
-        masked_logits = next_token_logits * mask[:, 1:]
-        logit_sums = masked_logits.sum(axis=1)
-        return logit_sums
-    if isinstance(appends, list):
-        prompts = [prompt + str(a) for prompt in prompts for a in appends]
-    scores = _score(model, processor, prompts)
-    choices = prompts
-    if appends is None:
-        scores = [scores.argmax().item()]
-    elif isinstance(appends, int):
-        scores = scores.reshape((-1, appends)).argmax(axis=-1).tolist()
-    elif isinstance(appends, list):
-        scores = scores.reshape((-1, len(appends))).argmax(axis=-1).tolist()
-        choices = appends
-    else:
-        raise ValueError('appends must be of type None, int, or list')
-    if return_idx:
-        return scores
-    return [choices[i] for i in scores]
-
 def _choose_from(model, processor, prompt, choices='ABCDE', mute=False):
     def _ord(s):
         return processor([f' {i}' for i in s])['input_ids'][:,-1]
@@ -528,98 +496,19 @@ def _already(array_2d, array_1d):
         return mx.ones(array_2d.shape[0])
     return ~mx.all(array_2d[:, -len(array_1d):] == array_1d, axis=1)
 
-def _constrain(model, processor, prompt, constraints, return_full_text=False, mute=False):
-    if isinstance(prompt, str):
-        _was_prompt_str = True
-        prompt = [prompt]
-    else:
-        _was_prompt_str = False
-    prompt = [_preprocess(s) for s in prompt]
-    len_ps = [len(p) for p in prompt]
-    for constraint in constraints:
-        constraint_text = constraint[1]
-        id_constraint = mx.array(processor.tokenizer.encode(constraint_text, add_special_tokens=False)[1:])
-        dict_input = processor(prompt)
-        logits, cache = model(**dict_input, max_tokens=constraint[0] + id_constraint.shape[0]+10)
-        logits = nn.log_softmax(logits, axis=-1)
-        token = mx.argmax(logits[:, -1, :], axis=-1)[:,None]
-        running_score = mx.max(logits[:, -1, :], axis=-1)[:,None]
-        _score_0 = logits[:, -1, id_constraint[0]]
-        tiled_id_constraint = mx.tile(id_constraint, (token.shape[0], 1))
-        logits_rest, cache = model(input_ids=tiled_id_constraint, cache=cache, mask=dict_input.get('mask', None), pids=dict_input.get('pids', None), advance_offset=0)
-        logits_rest = nn.log_softmax(logits_rest, axis=-1)
-        _score_1 = logits_rest[mx.arange(tiled_id_constraint.shape[0])[:,None], mx.arange(tiled_id_constraint.shape[1]-1)[None,:], tiled_id_constraint[:,1:]]
-        score_sofar = mx.concatenate([_score_0[:,None], _score_1], axis = 1).mean(axis=1)
-        synth_sofar = tiled_id_constraint
-        synth_pad = mx.tile(mx.array([ID_EOS]), (tiled_id_constraint.shape[0], 1))
-        synth = tiled_id_constraint
-        tokens = []
-        finished_rows = mx.ones(tiled_id_constraint.shape[0])
-        for i in range(constraint[0]):
-            tokens.append(token)
-            synth = mx.concatenate(tokens+[tiled_id_constraint], axis=1)
-            token_plus = mx.concatenate([token, tiled_id_constraint], axis=1)
-            logits, cache = model(input_ids=token_plus, cache=cache, mask=dict_input.get('mask', None), pids=dict_input.get('pids', None), advance_offset=1)
-            logits = nn.log_softmax(logits)
-            token = mx.argmax(logits[:, 0, :], axis=-1)
-            finished_rows *= token != ID_EOS
-            token = token[:,None]
-            _synth_score = logits[mx.arange(tiled_id_constraint.shape[0])[:,None], mx.arange(tiled_id_constraint.shape[1])[None,:], tiled_id_constraint]
-            score = mx.concatenate([running_score, _synth_score], axis=1).mean(axis=1)
-            running_score = mx.concatenate([running_score, mx.max(logits[:, 0, :], axis=-1)[:, None]], axis=1)
-            synth_sofar = mx.concatenate([synth_sofar, synth_pad], axis=1)
-            finished_rows *= _already(mx.concatenate(tokens, axis=1), id_constraint)
-            if finished_rows.sum() < 1:
-                break
-            rows_to_update = score > score_sofar
-            rows_to_update *= finished_rows
-            synth_sofar = mx.where(rows_to_update[:,None], synth, synth_sofar)
-            score_sofar = mx.where(rows_to_update, score, score_sofar)
-        output = mx.concatenate([dict_input['input_ids'], synth_sofar], axis=1).tolist()
-        S = dict_input['input_ids'].shape[1]
-        output = [(i[:i.index(ID_EOS,S)] if ID_EOS in i[S:] else i) for i in output]
-        output = [[num for num in sublist if num not in (0,1)] for sublist in output]
-        output = processor.tokenizer.batch_decode(output)
-        output = [_preprocess(s) for s in output]
-        prompt = output
-    if not return_full_text:
-        output = [o[l:] for o,l in zip(output,len_ps)]
-    if not mute:
-        if _was_prompt_str:
-            print(output[0])
-        else:
-            for i,o in enumerate(output):
-                print(f'\n< Constrained text for prompt #{i} >\n{o}')
-    if _was_prompt_str:
-        output = output[0]
-    return output
-
-def _score(input_ids, mask, logits):
-    batch_size, seq_length, vocab_size = logits.shape
-    row_indices = mx.arange(batch_size)[:, None]
-    col_indices = mx.arange(seq_length - 1)[None, :]
-    token_indices = input_ids[:, 1:]
-    next_token_logits = logits[row_indices, col_indices, token_indices]
-    masked_logits = next_token_logits * mask[:, :-1]
-    logit_sums = masked_logits.sum(axis=1)
-    mask_counts = mask[:, :-1].sum(axis=1)
-    return logit_sums, mask_counts
-
-def _beam(model, processor, prompt, constraints, return_full_text=False, mute=False):
+def _beam(model, processor, prompt, constraints, return_full_text=False, mute=False, use_beam=False):
     def _get_beam(logits, cache, id_constraint, beam_idx=0, n_beam=3):
-        token = mx.argmax(logits[:, 0, :], axis=-1)
-        _B, _S, _V = logits.shape
+        token = mx.argmax(logits[:, beam_idx, :], axis=-1)
         _arg_beam = mx.argpartition(-logits[:, beam_idx, :], kth=n_beam, axis=-1)[:,:n_beam]
         _beam = _arg_beam.reshape(-1)[:,None]
         _beam = mx.concatenate([_beam, mx.tile(id_constraint, (_beam.shape[0], 1))], axis=-1)
         _beam_logits, cache = model(input_ids=_beam, cache=cache, n_beam=n_beam)
         _beam_logits = nn.log_softmax(_beam_logits)
-        _beam_score = _beam_logits[mx.arange(_beam_logits.shape[0])[:,None], mx.arange(_beam.shape[1]-1)[None,:], _beam[:,1:]]
-        _beam_score = mx.concatenate([logits[mx.arange(_arg_beam.shape[0])[:,None],beam_idx,_arg_beam].reshape(-1)[:,None], _beam_score], axis=1).mean(axis=1)
-        _beam_score = _beam_score.reshape(-1,n_beam)
-        _argmax_beam = mx.argmax(_beam_score, axis=-1)
-        beam_token = _arg_beam[mx.arange(len(_argmax_beam)), _argmax_beam]
-        return token, beam_token, cache
+        _beam_score = mx.concatenate([logits[mx.arange(_arg_beam.shape[0])[:,None], beam_idx, _arg_beam].reshape(-1)[:,None], _beam_logits[mx.arange(_beam_logits.shape[0])[:,None], mx.arange(_beam.shape[1]-1)[None,:], _beam[:,1:]]], axis=1)
+        _argmax_beam = mx.argmax(_beam_score.mean(axis=1).reshape(-1,n_beam), axis=-1)
+        beam_token = _arg_beam[mx.arange(_argmax_beam.shape[0]), _argmax_beam]
+        beam_score = _beam_score.reshape(logits.shape[0],n_beam, -1)[mx.arange(_argmax_beam.shape[0]), _argmax_beam]
+        return token, beam_token, beam_score, cache
     if isinstance(prompt, str):
         _was_prompt_str = True
         prompt = [prompt]
@@ -627,35 +516,53 @@ def _beam(model, processor, prompt, constraints, return_full_text=False, mute=Fa
         _was_prompt_str = False
     prompt = [_preprocess(s) for s in prompt]
     len_ps = [len(p) for p in prompt]
+    synth_pad = mx.tile(mx.array([ID_EOS]), (len(prompt), 1))
     for constraint in constraints:
         constraint_text = constraint[1]
         id_constraint = mx.array(processor.tokenizer.encode(constraint_text, add_special_tokens=False)[1:])
         dict_input = processor(prompt)
         logits, cache = model(**dict_input, max_tokens=constraint[0] + id_constraint.shape[0]+10)
         logits = nn.log_softmax(logits, axis=-1)
-        token = mx.argmax(logits[:, -1, :], axis=-1)[:,None]
-        _sum_init, _mask_init = _score(dict_input['input_ids'], dict_input['mask'], logits)
-        running_score = mx.max(logits[:, -1, :], axis=-1)[:,None]
         _score_0 = logits[:, -1, id_constraint[0]]
-        tiled_id_constraint = mx.tile(id_constraint, (token.shape[0], 1))
+        tiled_id_constraint = mx.tile(id_constraint, (logits.shape[0], 1))
         logits_rest, cache = model(input_ids=tiled_id_constraint, cache=cache, advance_offset=0)
         logits_rest = nn.log_softmax(logits_rest, axis=-1)
         _score_1 = logits_rest[mx.arange(tiled_id_constraint.shape[0])[:,None], mx.arange(tiled_id_constraint.shape[1]-1)[None,:], tiled_id_constraint[:,1:]]
-        score_sofar = mx.concatenate([_sum_init[:,None], _score_0[:,None], _score_1], axis=1).sum(axis=1) / (_mask_init + id_constraint.shape[0])
-        synth_sofar = tiled_id_constraint
-        synth_pad = mx.tile(mx.array([ID_EOS]), (tiled_id_constraint.shape[0], 1))
-        synth = tiled_id_constraint
+        running_score = mx.max(logits[:, -1, :], axis=-1)[:,None]
+        pre_beam_score = mx.concatenate([_score_0[:,None], _score_1], axis=1).mean(axis=1)
+        pre_beam_synth = mx.concatenate([tiled_id_constraint, synth_pad], axis=1)
+        if use_beam:
+            token, beam_token, beam_score, cache = _get_beam(logits, cache, id_constraint, -1)
+            post_beam_score =  mx.concatenate([running_score, beam_score], axis=1).mean(axis=1)
+            post_beam_synth = mx.concatenate([beam_token[:,None], tiled_id_constraint], axis=1)
+            win = pre_beam_score > post_beam_score
+            score_sofar = mx.where(win, pre_beam_score, post_beam_score)
+            synth_sofar = mx.where(win[:,None], pre_beam_synth, post_beam_synth)
+        else:
+            token = mx.argmax(logits[:, -1, :], axis=-1)
+            score_sofar = pre_beam_score
+            synth_sofar = pre_beam_synth
+        token = token[:,None]
         tokens = []
         finished_rows = mx.ones(tiled_id_constraint.shape[0])
         for i in range(constraint[0]):
             tokens.append(token)
-            synth = mx.concatenate(tokens+[tiled_id_constraint], axis=1)
             token_plus = mx.concatenate([token, tiled_id_constraint], axis=1)
             logits, cache = model(input_ids=token_plus, cache=cache, advance_offset=1)
             logits = nn.log_softmax(logits)
-            token, beam_token, cache = _get_beam(logits, cache, id_constraint)
-            _synth_score = logits[mx.arange(tiled_id_constraint.shape[0])[:,None], mx.arange(tiled_id_constraint.shape[1])[None,:], tiled_id_constraint]
-            score = mx.concatenate([running_score, _synth_score], axis=1).mean(axis=1)
+            pre_beam_score = mx.concatenate([running_score, logits[mx.arange(logits.shape[0])[:,None], mx.arange(logits.shape[1]-1)[None,:], token_plus[:,1:]]], axis=1).mean(axis=1)
+            pre_beam_synth = mx.concatenate(tokens + [tiled_id_constraint, synth_pad], axis=1)
+            if use_beam:
+                token, beam_token, beam_score, cache = _get_beam(logits, cache, id_constraint)
+                post_beam_score =  mx.concatenate([running_score, beam_score], axis=1).mean(axis=1)
+                post_beam_synth = mx.concatenate(tokens + [beam_token[:,None], tiled_id_constraint], axis=1)
+                win = pre_beam_score > post_beam_score
+                score = mx.where(win, pre_beam_score, post_beam_score)
+                synth = mx.where(win[:,None], pre_beam_synth, post_beam_synth)
+            else:
+                token = mx.argmax(logits[:, 0, :], axis=-1)
+                score = pre_beam_score
+                synth = pre_beam_synth
             synth_sofar = mx.concatenate([synth_sofar, synth_pad], axis=1)
             finished_rows *= _already(mx.concatenate(tokens, axis=1), id_constraint)
             if finished_rows.sum() < 1:
@@ -664,7 +571,6 @@ def _beam(model, processor, prompt, constraints, return_full_text=False, mute=Fa
             rows_to_update *= finished_rows
             synth_sofar = mx.where(rows_to_update[:,None], synth, synth_sofar)
             score_sofar = mx.where(rows_to_update, score, score_sofar)
-            token = mx.where(rows_to_update, beam_token, token)
             running_score = mx.concatenate([running_score, logits[mx.arange(token.shape[0]),0,token][:,None]], axis=1)
             finished_rows *= token != ID_EOS
             token = token[:,None]
@@ -682,7 +588,7 @@ def _beam(model, processor, prompt, constraints, return_full_text=False, mute=Fa
             print(output[0])
         else:
             for i,o in enumerate(output):
-                print(f'\n< Generated text for prompt #{i} >\n{o}')
+                print(f'\n< Constrained text for prompt #{i} >\n{o}')
     if _was_prompt_str:
         output = output[0]
     return output
@@ -1112,7 +1018,7 @@ def train_lora(model_path=PATH_QUANTIZED_PHI3_BLIND, adapter_path=None, lora_tar
     del model
     del processor
 
-def test_lora(model_path=PATH_QUANTIZED_PHI3_BLIND, adapter_path=True, dataset_path="JosefAlbers/akemiH_MedQA_Reason", take=(0, 10), batch_size=10, test_result_path='test_result.csv'):
+def test_lora(model_path=PATH_QUANTIZED_PHI3_BLIND, adapter_path=True, dataset_path="JosefAlbers/akemiH_MedQA_Reason", take=(0, 10), batch_size=1, test_result_path='test_result.csv'):
     """
     Test a LoRA (Low-Rank Adaptation) model on a given dataset using various generation methods.
 
@@ -1155,7 +1061,7 @@ def test_lora(model_path=PATH_QUANTIZED_PHI3_BLIND, adapter_path=True, dataset_p
     Example:
     --------
     >>> test_lora(model_path="path/to/model", adapter_path="path/to/adapter",
-    ...           dataset_path="dataset/path", take=(0, 10), batch_size=10)
+    ...           dataset_path="dataset/path", take=(0, 10), batch_size=2)
     """
     def _try(example, q_col, q_until, q_format, fxn, a_format, a_col, c_col, verbose=True):
         questions = example[q_col]
@@ -1193,7 +1099,7 @@ def test_lora(model_path=PATH_QUANTIZED_PHI3_BLIND, adapter_path=True, dataset_p
             'q_col':'input',
             'q_until':' A: ',
             'q_format':None,
-            'fxn':partial(_generate, model=model, processor=processor, max_tokens=30, verbose=False, mute=True),
+            'fxn':partial(_generate, model=model, processor=processor, max_tokens=30, verbose=False, stream=False, mute=True),
             'a_format':None,
             'a_col':'summary_attempt',
             'c_col':'summary',
@@ -1213,7 +1119,7 @@ def test_lora(model_path=PATH_QUANTIZED_PHI3_BLIND, adapter_path=True, dataset_p
             'q_col':'input',
             'q_until':None,
             'q_format':'',
-            'fxn':partial(_constrain, model=model, processor=processor, constraints=[(100, ' The correct answer is'), (10, 'X.')], mute=True),
+            'fxn':partial(_beam, model=model, processor=processor, constraints=[(100, ' The correct answer is'), (1, 'X.')], mute=True, use_beam=False),
             'a_format':'The correct answer is ',
             'a_col':'constrained_attempt',
             'c_col':'output',
@@ -1223,7 +1129,7 @@ def test_lora(model_path=PATH_QUANTIZED_PHI3_BLIND, adapter_path=True, dataset_p
             'q_col':'input',
             'q_until':None,
             'q_format':'',
-            'fxn':partial(_beam, model=model, processor=processor, constraints=[(100, ' The correct answer is'), (10, 'X.')], mute=True),
+            'fxn':partial(_beam, model=model, processor=processor, constraints=[(100, ' The correct answer is'), (1, 'X.')], mute=True, use_beam=True),
             'a_format':'The correct answer is ',
             'a_col':'beamed_attempt',
             'c_col':'output',
@@ -1485,7 +1391,7 @@ def choose(prompt, choices='ABCDE', images=None, preload=None, blind_model=False
         prompt, _ = _apply_chat_template(prompt, images, verbose)
     return _choose_from(*preload, prompt=prompt, choices=choices)
 
-def constrain(prompt, constraints=[(30, ' The correct answer is'), (10, 'X.')], images=None, preload=None, blind_model=False, quantize_model=False, quantize_cache=False, use_adapter=False, verbose=True, apply_chat_template=True, use_beam=False):
+def constrain(prompt, constraints=[(30, ' The correct answer is'), (1, 'X.')], images=None, preload=None, blind_model=False, quantize_model=False, quantize_cache=False, use_adapter=False, verbose=True, apply_chat_template=True, use_beam=False):
     """
     Perform constrained decoding on the given prompt using specified constraints.
 
@@ -1542,9 +1448,8 @@ def constrain(prompt, constraints=[(30, ' The correct answer is'), (10, 'X.')], 
         preload = load(blind_model=blind_model, quantize_model=quantize_model, quantize_cache=quantize_cache, use_adapter=use_adapter)
     if apply_chat_template:
         prompt = _apply_chat_template(prompt, None, verbose)[0]
-    if use_beam:
-        return _beam(*preload, prompt=prompt, constraints=constraints)
-    return _constrain(*preload, prompt=prompt, constraints=constraints)
+    return _beam(*preload, prompt=prompt, constraints=constraints, use_beam=use_beam)
+
 
 def execute(code_strings, file_prefix=0, verbose=True):
     """
