@@ -429,7 +429,7 @@ class Phi3Attention(nn.Module):
         self.qkv_proj = nn.Linear(dim, op_size, bias=False)
         self.o_proj = nn.Linear(n_heads * head_dim, dim, bias=False)
 
-    def __call__(self, x, cache, cos, sin, mask):
+    def __call__(self, x, cache, cos, sin, mask, n_beam):
         @mx.compile
         def _rotate_half(x, cos, sin):
             midpoint = x.shape[-1] // 2
@@ -441,11 +441,18 @@ class Phi3Attention(nn.Module):
         queries = queries.reshape(B, L, self.n_heads, -1).transpose(0, 2, 1, 3)
         keys = keys.reshape(B, L, self.n_kv_heads, -1).transpose(0, 2, 1, 3)
         values = values.reshape(B, L, self.n_kv_heads, -1).transpose(0, 2, 1, 3)
+
+        if n_beam > 1:
+            sin = mx.repeat(sin, repeats=n_beam, axis=0)
+            cos = mx.repeat(cos, repeats=n_beam, axis=0)
+            mask = mx.repeat(mask, repeats=n_beam, axis=0)
+
         queries = _rotate_half(queries, cos, sin)
         keys = _rotate_half(keys, cos, sin)
-        keys, values = cache(keys, values)
+        keys, values = cache(keys, values, n_beam)
         scores = (queries * self.scale) @ keys.transpose(0, 1, 3, 2)
         scores += mask
+
         scores = mx.softmax(scores, axis=-1)
         output = scores @ values
         output = output.transpose(0, 2, 1, 3).reshape(B, L, -1)
@@ -470,8 +477,8 @@ class Phi3DecoderLayer(nn.Module):
         self.input_layernorm = nn.RMSNorm(config.hidden_size, eps=config.rms_norm_eps)
         self.post_attention_layernorm = nn.RMSNorm(config.hidden_size, eps=config.rms_norm_eps)
 
-    def __call__(self, x, cache, cos, sin, mask):
-        r = self.self_attn(self.input_layernorm(x), cache, cos, sin, mask)
+    def __call__(self, x, cache, cos, sin, mask, n_beam):
+        r = self.self_attn(self.input_layernorm(x), cache, cos, sin, mask, n_beam)
         h = x + r
         r = self.mlp(self.post_attention_layernorm(h))
         return h + r
@@ -507,15 +514,14 @@ class KVCache:
             self.kv = None
         else:
             self.kv = mx.zeros(shape, mx.float32)
-        self.n_beam = None
 
-    def __call__(self, keys, values):
+    def __call__(self, keys, values, n_beam):
         if self.max_tokens < 1:
             return keys, values
-        if self.n_beam:
+        if n_beam > 1:
             if self.use_quantized_cache:
                 raise NotImplementedError('Beam Search is not yet compatible with Quantized Cache')
-            kv = mx.repeat(self.kv[:,:,:,:self.offset,:], repeats=self.n_beam, axis=1)
+            kv = mx.repeat(self.kv[:,:,:,:self.offset,:], repeats=n_beam, axis=1)
             return mx.concatenate([kv[0], keys], axis=-2), mx.concatenate([kv[1], values], axis=-2)
         B, N, L, D = keys.shape
         new_offset = self.offset + L
@@ -534,9 +540,6 @@ class KVCache:
             self.offset = new_offset
             return self.kv[0,:,:,:new_offset,:], self.kv[1,:,:,:new_offset,:]
 
-    def beam(self, n_beam):
-        self.n_beam = n_beam
-
 class Mask4D:
     def __init__(self, L_all, mask):
         mask_4d = mx.triu(mx.full((L_all, L_all), -mx.inf), k=1)[None, None]
@@ -545,9 +548,8 @@ class Mask4D:
             mask = mx.pad(mask, ((0,0),(0,pad_len)), 1)
             mask = mx.expand_dims(mask, (1,2))
             mask = mask*mask.transpose(0,1,3,2)
-            mask = mx.where(mask==1, 0, -np.inf)
+            mask = mx.where(mask==1, 0, -mx.inf)
             mask_4d += mask
-            mask_4d = mx.repeat(mask_4d, 32, axis=1)
         self.mask_4d = mask_4d
 
     def __call__(self, past_L, L):
@@ -575,16 +577,9 @@ class Phi3F(nn.Module):
         past_L, new_L = cache[0].offset, x.shape[1]
         mask = self.masker(past_L, new_L)
         cos, sin = self.roper(past_L, new_L)
-        if n_beam is not None:
-            mask = mx.repeat(mask, repeats=n_beam, axis=0)
-            cos = mx.repeat(cos, repeats=n_beam, axis=0)
-            sin = mx.repeat(sin, repeats=n_beam, axis=0)
-            [c.beam(n_beam) for c in cache]
         for i, l in enumerate(self.layers):
-            x = l(x, cache[i], cos, sin, mask)
+            x = l(x, cache[i], cos, sin, mask, n_beam)
 
-        if n_beam is not None:
-            [c.beam(None) for c in cache]
         if advance_offset is not None:
             for c in cache:
                 c.offset = past_L + advance_offset
@@ -602,7 +597,7 @@ class Phi3ForCausalLM(nn.Module):
         self.model = Phi3F(config)
         self.lm_head = nn.Linear(config.hidden_size, config.vocab_size, bias=False)
 
-    def __call__(self, input_ids, pixel_values=None, image_sizes=None, positions=None, cache=None, pids=None, mask=None, max_tokens=0, advance_offset=None, n_beam=None):
+    def __call__(self, input_ids, pixel_values=None, image_sizes=None, positions=None, cache=None, pids=None, mask=None, max_tokens=0, advance_offset=None, n_beam=1):
         x, cache = self.model(input_ids, pixel_values, image_sizes, positions, cache, pids, mask, max_tokens, advance_offset, n_beam)
         return self.lm_head(x), cache
 

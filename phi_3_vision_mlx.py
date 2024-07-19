@@ -378,13 +378,13 @@ def _generate(model, processor, prompt, images=None, max_tokens=1000, verbose=Tr
     logit_stopper = LogitStopper(max_tokens, early_stop)
     streamer = Streamer(processor, stream, mute)
     dict_input = processor(prompt, images)
+    mask, pids = dict_input.get('mask', None), dict_input.get('pids', None)
     token_stopper = TokenStopper(processor, dict_input['input_ids'].shape[0])
     tic = Tic()
     logits, cache = model(**dict_input, max_tokens=max_tokens)
     token = mx.argmax(logits[:, -1, :], axis=-1)[:,None]
     mx.eval(token, logits, cache)
     streamer(token)
-    mask, pids = dict_input.get('mask', None), dict_input.get('pids', None)
     prompt_time = tic()
     for i in range(max_tokens-1):
         logits, cache = model(input_ids=token, cache=cache, mask=mask, pids=pids)
@@ -402,7 +402,7 @@ def _generate(model, processor, prompt, images=None, max_tokens=1000, verbose=Tr
     gen_tps = (gen_len - 1) / gen_time
     if verbose:
         print(f"\nPrompt: {prompt_tps:.2f} tokens-per-sec ({prompt_len} tokens / {prompt_time:.1f} sec)")
-        print(f"Generation: {gen_tps:.2f} tokens-per-sec ({gen_len} tokens / {gen_time:.1f} sec)")
+        print(f"Generate: {gen_tps:.2f} tokens-per-sec ({gen_len} tokens / {gen_time:.1f} sec)")
     if return_tps:
         return prompt_tps, gen_tps
     return result
@@ -496,24 +496,30 @@ def _already(array_2d, array_1d):
         return mx.ones(array_2d.shape[0])
     return ~mx.all(array_2d[:, -len(array_1d):] == array_1d, axis=1)
 
-def _beam(model, processor, prompt, constraints, return_full_text=False, mute=False, use_beam=False):
+def _constrain(model, processor, prompt, constraints, return_full_text=False, mute=False, use_beam=False, verbose=True):
     def _get_beam(logits, cache, id_constraint, beam_idx=0, n_beam=3):
         token = mx.argmax(logits[:, beam_idx, :], axis=-1)
         _arg_beam = mx.argpartition(-logits[:, beam_idx, :], kth=n_beam, axis=-1)[:,:n_beam]
         _beam = _arg_beam.reshape(-1)[:,None]
         _beam = mx.concatenate([_beam, mx.tile(id_constraint, (_beam.shape[0], 1))], axis=-1)
-        _beam_logits, cache = model(input_ids=_beam, cache=cache, n_beam=n_beam)
+        _beam_logits, _ = model(input_ids=_beam, cache=cache, n_beam=n_beam, advance_offset=0)
         _beam_logits = nn.log_softmax(_beam_logits)
         _beam_score = mx.concatenate([logits[mx.arange(_arg_beam.shape[0])[:,None], beam_idx, _arg_beam].reshape(-1)[:,None], _beam_logits[mx.arange(_beam_logits.shape[0])[:,None], mx.arange(_beam.shape[1]-1)[None,:], _beam[:,1:]]], axis=1)
         _argmax_beam = mx.argmax(_beam_score.mean(axis=1).reshape(-1,n_beam), axis=-1)
         beam_token = _arg_beam[mx.arange(_argmax_beam.shape[0]), _argmax_beam]
         beam_score = _beam_score.reshape(logits.shape[0],n_beam, -1)[mx.arange(_argmax_beam.shape[0]), _argmax_beam]
-        return token, beam_token, beam_score, cache
+        mx.eval(token, beam_token, beam_score)
+        return token, beam_token, beam_score
     if isinstance(prompt, str):
         _was_prompt_str = True
         prompt = [prompt]
     else:
         _was_prompt_str = False
+
+    tic = Tic()
+    prompt_time = 0
+    constrain_time = 0
+
     prompt = [_preprocess(s) for s in prompt]
     len_ps = [len(p) for p in prompt]
     synth_pad = mx.tile(mx.array([ID_EOS]), (len(prompt), 1))
@@ -523,17 +529,18 @@ def _beam(model, processor, prompt, constraints, return_full_text=False, mute=Fa
         dict_input = processor(prompt)
         logits, cache = model(**dict_input, max_tokens=constraint[0] + id_constraint.shape[0]+10)
         logits = nn.log_softmax(logits, axis=-1)
+        mx.eval(logits, cache)
         _score_0 = logits[:, -1, id_constraint[0]]
         tiled_id_constraint = mx.tile(id_constraint, (logits.shape[0], 1))
-        logits_rest, cache = model(input_ids=tiled_id_constraint, cache=cache, advance_offset=0)
+        logits_rest, _ = model(input_ids=tiled_id_constraint, cache=cache, advance_offset=0)
         logits_rest = nn.log_softmax(logits_rest, axis=-1)
         _score_1 = logits_rest[mx.arange(tiled_id_constraint.shape[0])[:,None], mx.arange(tiled_id_constraint.shape[1]-1)[None,:], tiled_id_constraint[:,1:]]
         running_score = mx.max(logits[:, -1, :], axis=-1)[:,None]
         pre_beam_score = mx.concatenate([_score_0[:,None], _score_1], axis=1).mean(axis=1)
         pre_beam_synth = mx.concatenate([tiled_id_constraint, synth_pad], axis=1)
         if use_beam:
-            token, beam_token, beam_score, cache = _get_beam(logits, cache, id_constraint, -1)
-            post_beam_score =  mx.concatenate([running_score, beam_score], axis=1).mean(axis=1)
+            token, beam_token, beam_score = _get_beam(logits, cache, id_constraint, -1)
+            post_beam_score = mx.concatenate([running_score, beam_score], axis=1).mean(axis=1)
             post_beam_synth = mx.concatenate([beam_token[:,None], tiled_id_constraint], axis=1)
             win = pre_beam_score > post_beam_score
             score_sofar = mx.where(win, pre_beam_score, post_beam_score)
@@ -543,17 +550,20 @@ def _beam(model, processor, prompt, constraints, return_full_text=False, mute=Fa
             score_sofar = pre_beam_score
             synth_sofar = pre_beam_synth
         token = token[:,None]
+        mx.eval(token)
         tokens = []
         finished_rows = mx.ones(tiled_id_constraint.shape[0])
+        prompt_time += tic()
         for i in range(constraint[0]):
             tokens.append(token)
             token_plus = mx.concatenate([token, tiled_id_constraint], axis=1)
             logits, cache = model(input_ids=token_plus, cache=cache, advance_offset=1)
             logits = nn.log_softmax(logits)
+            mx.eval(logits, cache)
             pre_beam_score = mx.concatenate([running_score, logits[mx.arange(logits.shape[0])[:,None], mx.arange(logits.shape[1]-1)[None,:], token_plus[:,1:]]], axis=1).mean(axis=1)
             pre_beam_synth = mx.concatenate(tokens + [tiled_id_constraint, synth_pad], axis=1)
             if use_beam:
-                token, beam_token, beam_score, cache = _get_beam(logits, cache, id_constraint)
+                token, beam_token, beam_score = _get_beam(logits, cache, id_constraint)
                 post_beam_score =  mx.concatenate([running_score, beam_score], axis=1).mean(axis=1)
                 post_beam_synth = mx.concatenate(tokens + [beam_token[:,None], tiled_id_constraint], axis=1)
                 win = pre_beam_score > post_beam_score
@@ -574,6 +584,8 @@ def _beam(model, processor, prompt, constraints, return_full_text=False, mute=Fa
             running_score = mx.concatenate([running_score, logits[mx.arange(token.shape[0]),0,token][:,None]], axis=1)
             finished_rows *= token != ID_EOS
             token = token[:,None]
+            mx.eval(token)
+        constrain_time += tic()
         output = mx.concatenate([dict_input['input_ids'], synth_sofar], axis=1).tolist()
         S = dict_input['input_ids'].shape[1]
         output = [(i[:i.index(ID_EOS,S)] if ID_EOS in i[S:] else i) for i in output]
@@ -589,6 +601,8 @@ def _beam(model, processor, prompt, constraints, return_full_text=False, mute=Fa
         else:
             for i,o in enumerate(output):
                 print(f'\n< Constrained text for prompt #{i} >\n{o}')
+    if verbose:
+        print(f'Prompt: {prompt_time:.2f} sec\nConstrain: {constrain_time:.2f} sec')
     if _was_prompt_str:
         output = output[0]
     return output
@@ -1119,7 +1133,7 @@ def test_lora(model_path=PATH_QUANTIZED_PHI3_BLIND, adapter_path=True, dataset_p
             'q_col':'input',
             'q_until':None,
             'q_format':'',
-            'fxn':partial(_beam, model=model, processor=processor, constraints=[(100, ' The correct answer is'), (1, 'X.')], mute=True, use_beam=False),
+            'fxn':partial(_constrain, model=model, processor=processor, constraints=[(100, ' The correct answer is'), (1, 'X.')], verbose=False, mute=True, use_beam=False),
             'a_format':'The correct answer is ',
             'a_col':'constrained_attempt',
             'c_col':'output',
@@ -1129,7 +1143,7 @@ def test_lora(model_path=PATH_QUANTIZED_PHI3_BLIND, adapter_path=True, dataset_p
             'q_col':'input',
             'q_until':None,
             'q_format':'',
-            'fxn':partial(_beam, model=model, processor=processor, constraints=[(100, ' The correct answer is'), (1, 'X.')], mute=True, use_beam=True),
+            'fxn':partial(_constrain, model=model, processor=processor, constraints=[(100, ' The correct answer is'), (1, 'X.')], verbose=False, mute=True, use_beam=True),
             'a_format':'The correct answer is ',
             'a_col':'beamed_attempt',
             'c_col':'output',
@@ -1448,7 +1462,7 @@ def constrain(prompt, constraints=[(30, ' The correct answer is'), (1, 'X.')], i
         preload = load(blind_model=blind_model, quantize_model=quantize_model, quantize_cache=quantize_cache, use_adapter=use_adapter)
     if apply_chat_template:
         prompt = _apply_chat_template(prompt, None, verbose)[0]
-    return _beam(*preload, prompt=prompt, constraints=constraints, use_beam=use_beam)
+    return _constrain(*preload, prompt=prompt, constraints=constraints, use_beam=use_beam, verbose=verbose)
 
 
 def execute(code_strings, file_prefix=0, verbose=True):
