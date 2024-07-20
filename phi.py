@@ -535,8 +535,8 @@ class KVCache:
             self.offset = new_offset
             return keys, values
         else:
-            self.kv[0,:,:,self.offset:new_offset,:] = keys
-            self.kv[1,:,:,self.offset:new_offset,:] = values
+            self.kv[0,:,:,self.offset:new_offset,:] = keys.astype(mx.float32)
+            self.kv[1,:,:,self.offset:new_offset,:] = values.astype(mx.float32)
             self.offset = new_offset
             return self.kv[0,:,:,:new_offset,:], self.kv[1,:,:,:new_offset,:]
 

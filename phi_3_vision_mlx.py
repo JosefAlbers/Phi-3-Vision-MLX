@@ -46,7 +46,7 @@ class Streamer:
     def __init__(self, processor, stream, mute):
         self.tokenizer = processor.tokenizer
         self.mute = mute
-        self.stream = stream and mute
+        self.stream = stream and (not mute)
         self.list_tokens = []
         self.idx_sofar = 0
     def __call__(self, token):
@@ -71,7 +71,7 @@ class Streamer:
         else:
             arr_tokens = mx.concatenate(self.list_tokens, axis=1)
             list_txt = self.tokenizer.batch_decode([(i[:i.index(ID_EOS)+1] if ID_EOS in i else i) for i in arr_tokens.tolist()])
-            if self.mute is False:
+            if not self.mute:
                 for i, gen in enumerate(list_txt):
                     print(f'\n< Generated text for prompt #{i} >\n{gen}')
             return list_txt, arr_tokens.size
@@ -372,7 +372,7 @@ def _get_wt(model_path, model_cfg):
         return [(k, v) for wf in glob.glob(f"{model_path}/*.safetensors") for k, v in mx.load(wf).items()]
     return [(k, v.transpose(0, 2, 3, 1) if "patch_embedding.weight" in k else v) for wf in glob.glob(f"{model_path}/*.safetensors") for k, v in mx.load(wf).items()]
 
-def _generate(model, processor, prompt, images=None, max_tokens=1000, verbose=True, return_tps=False, early_stop=False, stream=True, mute=False):
+def _generate(model, processor, prompt, images=None, max_tokens=512, verbose=True, return_tps=False, early_stop=False, stream=True, mute=False):
     if images is not None and isinstance(prompt, list):
         raise ValueError('Images cannot be provided when prompt is a list')
     logit_stopper = LogitStopper(max_tokens, early_stop)
@@ -383,13 +383,13 @@ def _generate(model, processor, prompt, images=None, max_tokens=1000, verbose=Tr
     tic = Tic()
     logits, cache = model(**dict_input, max_tokens=max_tokens)
     token = mx.argmax(logits[:, -1, :], axis=-1)[:,None]
-    mx.eval(token, logits, cache)
+    mx.eval(token, logits)#, cache)
     streamer(token)
     prompt_time = tic()
     for i in range(max_tokens-1):
         logits, cache = model(input_ids=token, cache=cache, mask=mask, pids=pids)
         token = mx.argmax(logits[:, -1, :], axis=-1)[:,None]
-        mx.eval(token, logits, cache)
+        mx.eval(token, logits)#, cache)
         streamer(token)
         if logit_stopper(logits):
             break
@@ -529,7 +529,7 @@ def _constrain(model, processor, prompt, constraints, return_full_text=False, mu
         dict_input = processor(prompt)
         logits, cache = model(**dict_input, max_tokens=constraint[0] + id_constraint.shape[0]+10)
         logits = nn.log_softmax(logits, axis=-1)
-        mx.eval(logits, cache)
+        mx.eval(logits)
         _score_0 = logits[:, -1, id_constraint[0]]
         tiled_id_constraint = mx.tile(id_constraint, (logits.shape[0], 1))
         logits_rest, _ = model(input_ids=tiled_id_constraint, cache=cache, advance_offset=0)
@@ -559,7 +559,7 @@ def _constrain(model, processor, prompt, constraints, return_full_text=False, mu
             token_plus = mx.concatenate([token, tiled_id_constraint], axis=1)
             logits, cache = model(input_ids=token_plus, cache=cache, advance_offset=1)
             logits = nn.log_softmax(logits)
-            mx.eval(logits, cache)
+            mx.eval(logits)
             pre_beam_score = mx.concatenate([running_score, logits[mx.arange(logits.shape[0])[:,None], mx.arange(logits.shape[1]-1)[None,:], token_plus[:,1:]]], axis=1).mean(axis=1)
             pre_beam_synth = mx.concatenate(tokens + [tiled_id_constraint, synth_pad], axis=1)
             if use_beam:
@@ -1308,7 +1308,7 @@ def load(blind_model=False, quantize_model=False, quantize_cache=False, use_adap
         _setup()
     return _load(model_path=model_path, use_quantized_cache=quantize_cache, adapter_path=adapter_path)
 
-def generate(prompt, images=None, preload=None, blind_model=False, quantize_model=False, quantize_cache=False, use_adapter=False, max_tokens=1000, verbose=True, return_tps=False, early_stop=False, stream=True, apply_chat_template=True):
+def generate(prompt, images=None, preload=None, blind_model=False, quantize_model=False, quantize_cache=False, use_adapter=False, max_tokens=512, verbose=True, return_tps=False, early_stop=False, stream=True, apply_chat_template=True):
     """
     Generate text based on a given prompt, optionally with image input.
 
@@ -1463,7 +1463,6 @@ def constrain(prompt, constraints=[(30, ' The correct answer is'), (1, 'X.')], i
     if apply_chat_template:
         prompt = _apply_chat_template(prompt, None, verbose)[0]
     return _constrain(*preload, prompt=prompt, constraints=constraints, use_beam=use_beam, verbose=verbose)
-
 
 def execute(code_strings, file_prefix=0, verbose=True):
     """
