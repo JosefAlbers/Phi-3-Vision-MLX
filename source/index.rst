@@ -1,6 +1,6 @@
 .. phi-3-vision-mlx documentation master file
 
-Welcome to phi-3-vision-mlx's documentation!
+Welcome to Phi-3-MLX's documentation!
 ============================================
 
 Phi-3-MLX is a versatile AI framework that leverages both the Phi-3-Vision multimodal model and the recently updated Phi-3-Mini-128K language model, optimized for Apple Silicon using the MLX framework.
@@ -36,7 +36,7 @@ API Reference
 -------------
 
 .. toctree::
-   :maxdepth: 1
+   :maxdepth: 2
 
    module
 
