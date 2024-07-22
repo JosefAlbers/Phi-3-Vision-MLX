@@ -10,10 +10,10 @@ import phi_3_vision_mlx as pv
 pv.generate("Write a Python function to calculate the Fibonacci sequence up to a given number n.", blind_model=True, quantize_model=True)
 
 ### Constrained Decoding
-pv.constrain("Write a Python function to calculate the Fibonacci sequence up to a given number n.", [(100, "\n```python\n"), (100, " return "), (200, "\n```")], use_beam=False)
+pv.constrain("Write a Python function to calculate the Fibonacci sequence up to a given number n.", [(100, "\n```python\n"), (100, " return "), (200, "\n```")], use_beam=False, blind_model=True, quantize_model=True)
 
 ### Constrained Beam Search
-pv.constrain("Write a Python function to calculate the Fibonacci sequence up to a given number n.", [(100, "\n```python\n"), (100, " return "), (200, "\n```")], use_beam=True)
+pv.constrain("Write a Python function to calculate the Fibonacci sequence up to a given number n.", [(100, "\n```python\n"), (100, " return "), (200, "\n```")], use_beam=True, blind_model=True, quantize_model=True)
 
 ## Multiple Choice Question Answering
 prompts = [
@@ -30,7 +30,9 @@ pv.constrain(prompts, constraints=[(100, ' The correct answer is'), (1, 'X.')], 
 ### Multiple Choice Selection
 pv.choose(prompts, choices='ABCDE')
 
-# Train
+# LoRA
+
+## Train
 pv.train_lora(
     lora_layers=5,  # Number of layers to apply LoRA
     lora_rank=16,   # Rank of the LoRA adaptation
@@ -40,29 +42,54 @@ pv.train_lora(
     dataset_path="JosefAlbers/akemiH_MedQA_Reason"
 )
 
-# Test
+## Test
 pv.test_lora()
 
-# Multi-turn VQA
+# Agent
+
+## Multi-turn VQA
 agent = pv.Agent()
 agent('What is shown in this image?', 'https://collectionapi.metmuseum.org/api/collection/v1/iiif/344291/725918/main-image')
 agent('What is the location?')
 agent.end()
 
-# Generative Feedback Loop
+## Generative Feedback Loop
 agent('Plot a Lissajous Curve.')
 agent('Modify the code to plot 3:4 frequency')
 agent.end()
 
-# API Tool Use
+## API Tool Use
 agent('Draw "A perfectly red apple, 32k HDR, studio lighting"')
 agent.end()
 agent('Speak "People say nothing is impossible, but I do nothing every day."')
 agent.end()
 
+# Toolchain
+
+## LLM Backend Hotswap
+agent = pv.Agent(toolchain = "responses, history = mistral_api(prompt, history)")
+agent('Write a neurology ICU admission note')
+agent('Give me the inpatient BP goal for this patient.')
+agent('DVT ppx for this pt?')
+agent("The patient's prognosis?")
+agent.end()
+
 # Misc
 pv.add_text('How to inspect API endpoints? @https://raw.githubusercontent.com/gradio-app/gradio/main/guides/08_gradio-clients-and-lite/01_getting-started-with-the-python-client.md')
 pv.rag('Comparison of Sortino Ratio for Bitcoin and Ethereum.')
+
+try:
+    from rd2md import rd2md
+    from pathlib import Path
+    import json
+    filename, contents, images = rd2md(post_url='https://www.reddit.com/r/LocalLLaMA/comments/1e7pdig/this_sums_up_my_experience_with_all_llm/')
+    prompt = 'Write an executive summary of above (max 200 words). The article should capture the diverse range of opinions and key points discussed in the thread, presenting a balanced view of the topic without quoting specific users or comments directly. Focus on organizing the information cohesively, highlighting major arguments, counterarguments, and any emerging consensus or unresolved issues within the community.'
+    prompts = [f'{s}\n\n{prompt}' for s in contents]
+    results = [pv.generate(prompts[i], images[i], max_tokens=512, blind_model=False, quantize_model=False, verbose=False) for i in range(len(prompts))]
+    with open(Path(filename).with_suffix('.json'), 'w') as f:
+        json.dump({'prompts':prompts, 'images':images, 'results':results}, f, indent=4)
+except Exception:
+    print("This example requires the 'rd-to-md' package (https://github.com/JosefAlbers/rd2md). Install it with: pip install rd-to-md")
 
 # Benchmark
 pv.benchmark()

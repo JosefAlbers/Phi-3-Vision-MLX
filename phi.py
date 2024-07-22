@@ -450,11 +450,14 @@ class Phi3Attention(nn.Module):
         queries = _rotate_half(queries, cos, sin)
         keys = _rotate_half(keys, cos, sin)
         keys, values = cache(keys, values, n_beam)
+
         scores = (queries * self.scale) @ keys.transpose(0, 1, 3, 2)
         scores += mask
-
         scores = mx.softmax(scores, axis=-1)
         output = scores @ values
+
+        # output = mx.fast.scaled_dot_product_attention(queries, keys, values, scale=self.scale, mask=mask)
+
         output = output.transpose(0, 2, 1, 3).reshape(B, L, -1)
         return self.o_proj(output)
 

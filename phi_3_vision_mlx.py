@@ -67,7 +67,7 @@ class Streamer:
         if self.stream:
             txt = self.tokenizer.decode(self.list_tokens)
             print(txt[self.idx_sofar:])
-            return [txt], len(self.list_tokens)
+            return txt, len(self.list_tokens)
         else:
             arr_tokens = mx.concatenate(self.list_tokens, axis=1)
             list_txt = self.tokenizer.batch_decode([(i[:i.index(ID_EOS)+1] if ID_EOS in i else i) for i in arr_tokens.tolist()])
@@ -169,10 +169,10 @@ class Agent:
 
     Notes:
     ------
-    - The Agent supports API input handling, which can be enabled/disabled during initialization.
+    - The Agent's behavior regarding API input handling is determined by the 'enable_api'
+      parameter in the kwargs. This affects how the Agent processes certain prompts.
     - The toolchain can be customized to include different functions and processing steps.
     - The Agent maintains a log of all operations, which can be useful for debugging or analysis.
-    - The 'enable_api' parameter affects how the Agent handles quotation marks in prompts.
     """
     _default_toolchain = """
         prompt = add_code(prompt, codes)
@@ -180,8 +180,9 @@ class Agent:
         files, codes = execute(responses, step)
         """
     def __init__(self, toolchain=None, enable_api=True, **kwargs):
-        self.kwargs = kwargs if 'preload' in kwargs else kwargs|{'preload':load(**kwargs)}
+        kwargs = kwargs|{'enable_api':enable_api}
         self.enable_api = enable_api
+        self.kwargs = kwargs if 'preload' in kwargs else kwargs|{'preload':load(**kwargs)}
         self.set_toolchain(toolchain)
         self.reset()
     def __call__(self, prompt:str, images=None):
@@ -383,13 +384,13 @@ def _generate(model, processor, prompt, images=None, max_tokens=512, verbose=Tru
     tic = Tic()
     logits, cache = model(**dict_input, max_tokens=max_tokens)
     token = mx.argmax(logits[:, -1, :], axis=-1)[:,None]
-    mx.eval(token, logits)#, cache)
+    mx.eval(token, logits)
     streamer(token)
     prompt_time = tic()
     for i in range(max_tokens-1):
         logits, cache = model(input_ids=token, cache=cache, mask=mask, pids=pids)
         token = mx.argmax(logits[:, -1, :], axis=-1)[:,None]
-        mx.eval(token, logits)#, cache)
+        mx.eval(token, logits)
         streamer(token)
         if logit_stopper(logits):
             break
@@ -851,6 +852,8 @@ def chat_ui(agent=None):
         agent_output = agent(*agent_input)
         responses, files = agent_output['responses'], agent_output['files']
         if responses is not None:
+            if isinstance(responses, str):
+                responses = [responses]
             for response in responses:
                 response = response[:response.find('<|end|>')] if '<|end|>' in response else response
                 lines = response.splitlines()
@@ -1308,7 +1311,7 @@ def load(blind_model=False, quantize_model=False, quantize_cache=False, use_adap
         _setup()
     return _load(model_path=model_path, use_quantized_cache=quantize_cache, adapter_path=adapter_path)
 
-def generate(prompt, images=None, preload=None, blind_model=False, quantize_model=False, quantize_cache=False, use_adapter=False, max_tokens=512, verbose=True, return_tps=False, early_stop=False, stream=True, apply_chat_template=True):
+def generate(prompt, images=None, preload=None, blind_model=False, quantize_model=False, quantize_cache=False, use_adapter=False, max_tokens=512, verbose=True, return_tps=False, early_stop=False, stream=True, apply_chat_template=True, enable_api=False):
     """
     Generate text based on a given prompt, optionally with image input.
 
@@ -1329,7 +1332,7 @@ def generate(prompt, images=None, preload=None, blind_model=False, quantize_mode
     use_adapter : bool, optional
         If True, use a LoRA adapter with the model. Default is False.
     max_tokens : int, optional
-        Maximum number of tokens to generate. Default is 1000.
+        Maximum number of tokens to generate. Default is 512.
     verbose : bool, optional
         If True, print additional information during generation. Default is True.
     return_tps : bool, optional
@@ -1340,6 +1343,8 @@ def generate(prompt, images=None, preload=None, blind_model=False, quantize_mode
         If True, stream the generated text. Default is True.
     apply_chat_template : bool, optional
         If True, apply a chat template to the prompt. Default is True.
+    enable_api : bool, optional
+        If True, enable API-related functionality. Default is False.
 
     Returns:
     --------
@@ -1349,10 +1354,10 @@ def generate(prompt, images=None, preload=None, blind_model=False, quantize_mode
 
     Notes:
     ------
-    - If '<|api_input|>' is in the prompt, it will call get_api() instead.
+    - If '<|api_input|>' is in the prompt and enable_api is True, it will call get_api() instead.
     - The function can handle both text-only and text-image inputs.
     """
-    if '<|api_input|>' in prompt:
+    if '<|api_input|>' in prompt and enable_api:
         return get_api(prompt)
     if preload is None:
         preload = load(blind_model=blind_model, quantize_model=quantize_model, quantize_cache=quantize_cache, use_adapter=use_adapter)
