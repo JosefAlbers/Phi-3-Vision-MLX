@@ -82,10 +82,10 @@ try:
     from rd2md import rd2md
     from pathlib import Path
     import json
-    filename, contents, images = rd2md(post_url='https://www.reddit.com/r/LocalLLaMA/comments/1e7pdig/this_sums_up_my_experience_with_all_llm/')
+    filename, contents, images = rd2md()
     prompt = 'Write an executive summary of above (max 200 words). The article should capture the diverse range of opinions and key points discussed in the thread, presenting a balanced view of the topic without quoting specific users or comments directly. Focus on organizing the information cohesively, highlighting major arguments, counterarguments, and any emerging consensus or unresolved issues within the community.'
     prompts = [f'{s}\n\n{prompt}' for s in contents]
-    results = [pv.generate(prompts[i], images[i], max_tokens=512, blind_model=False, quantize_model=False, verbose=False) for i in range(len(prompts))]
+    results = [pv.generate(prompts[i], images[i], max_tokens=512, blind_model=False, quantize_model=True, quantize_cache=False, verbose=False) for i in range(len(prompts))]
     with open(Path(filename).with_suffix('.json'), 'w') as f:
         json.dump({'prompts':prompts, 'images':images, 'results':results}, f, indent=4)
 except Exception:

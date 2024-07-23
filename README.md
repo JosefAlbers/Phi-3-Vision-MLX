@@ -1,11 +1,11 @@
 # Phi-3-MLX: Language and Vision Models for Apple Silicon
 
-Phi-3-MLX is a versatile AI framework that leverages both the Phi-3-Vision multimodal model and the recently updated ([July 2, 2024](https://x.com/reach_vb/status/1808056108319179012)) Phi-3-Mini-128K language model, optimized for Apple Silicon using the MLX framework. This project provides an easy-to-use interface for a wide range of AI tasks, from advanced text generation to visual question answering and code execution.
+Phi-3-MLX is a versatile AI framework that leverages both the Phi-3-Vision multimodal model and the Phi-3-Mini-128K language model, optimized for Apple Silicon using the MLX framework. This project provides an easy-to-use interface for a wide range of AI tasks, from advanced text generation to visual question answering and code execution.
 
 ## Features
 
-- Support for the newly updated Phi-3-Mini-128K (language-only) model
 - Integration with Phi-3-Vision (multimodal) model
+- Support for the Phi-3-Mini-128K (language-only) model
 - Optimized performance on Apple Silicon using MLX
 - Batched generation for processing multiple prompts
 - Flexible agent system for various AI tasks
@@ -48,7 +48,6 @@ prompts = [
     "Describe a bustling alien marketplace on a distant planet with unique goods and creatures."
     "Implement a basic encryption algorithm in Python.",
 ]
-
 # Generate responses using Phi-3-Vision (multimodal model)
 generate(prompts, max_tokens=100)
 
@@ -70,7 +69,8 @@ prompt = "Write a Python function to calculate the Fibonacci sequence up to a gi
 constraints = [
     (100, "\n```python\n"), # Start of code block
     (100, " return "),      # Ensure a return statement
-    (200, "\n```")],        # End of code block
+    (200, "\n```"),         # End of code block
+]
 
 # Apply constrained decoding using the 'constrain' function from phi_3_vision_mlx.
 constrain(prompt, constraints)
@@ -83,7 +83,6 @@ prompts = [
     "A 20-year-old woman presents with menorrhagia for the past several years. She says that her menses “have always been heavy”, and she has experienced easy bruising for as long as she can remember. Family history is significant for her mother, who had similar problems with bruising easily. The patient's vital signs include: heart rate 98/min, respiratory rate 14/min, temperature 36.1°C (96.9°F), and blood pressure 110/87 mm Hg. Physical examination is unremarkable. Laboratory tests show the following: platelet count 200,000/mm3, PT 12 seconds, and PTT 43 seconds. Which of the following is the most likely cause of this patient’s symptoms? A: Factor V Leiden B: Hemophilia A C: Lupus anticoagulant D: Protein C deficiency E: Von Willebrand disease",
     "A 25-year-old primigravida presents to her physician for a routine prenatal visit. She is at 34 weeks gestation, as confirmed by an ultrasound examination. She has no complaints, but notes that the new shoes she bought 2 weeks ago do not fit anymore. The course of her pregnancy has been uneventful and she has been compliant with the recommended prenatal care. Her medical history is unremarkable. She has a 15-pound weight gain since the last visit 3 weeks ago. Her vital signs are as follows: blood pressure, 148/90 mm Hg; heart rate, 88/min; respiratory rate, 16/min; and temperature, 36.6℃ (97.9℉). The blood pressure on repeat assessment 4 hours later is 151/90 mm Hg. The fetal heart rate is 151/min. The physical examination is significant for 2+ pitting edema of the lower extremity. Which of the following tests o should confirm the probable condition of this patient? A: Bilirubin assessment B: Coagulation studies C: Hematocrit assessment D: Leukocyte count with differential E: 24-hour urine protein"
 ]
-
 # Apply vanilla constrained decoding
 constrain(prompts, constraints=[(30, ' The correct answer is'), (10, 'X.')], blind_model=True, quantize_model=True, use_beam=False)
 
@@ -292,7 +291,7 @@ agent_writer(f'Write a stock analysis report on: {user_input}', images)
 
 ```python
 # Create Agent with Mistral-7B-Instruct-v0.3 instead
-agent = pv.Agent(toolchain = "responses, history = mistral_api(prompt, history)")
+agent = Agent(toolchain = "responses, history = mistral_api(prompt, history)")
 
 # Generate a neurology ICU admission note
 agent('Write a neurology ICU admission note.')
@@ -300,11 +299,42 @@ agent('Write a neurology ICU admission note.')
 # Follow-up questions (multi-turn conversation)
 agent('Give me the inpatient BP goal for this patient.')
 agent('DVT ppx for this pt?')
-agent('What is the px?')
+agent("What is the pt's px?")
 
 # End
 agent.end()
 ```
+
+## Examples
+
+For more advanced and detailed examples, including multi-modal processing and integration with external libraries, please see the examples.py file in the root directory of this project. 
+
+Here's a quick preview of what you can find in examples.py:
+
+```python
+# Multimodal Reddit Thread Summarization
+
+from rd2md import rd2md
+from pathlib import Path
+import json
+
+filename, contents, images = rd2md()
+prompt = 'Write an executive summary of above (max 200 words). The article should capture the diverse range of opinions and key points discussed in the thread, presenting a balanced view of the topic without quoting specific users or comments directly. Focus on organizing the information cohesively, highlighting major arguments, counterarguments, and any emerging consensus or unresolved issues within the community.'
+prompts = [f'{s}\n\n{prompt}' for s in contents]
+results = [generate(prompts[i], images[i], max_tokens=512, blind_model=False, quantize_model=True, quantize_cache=False, verbose=False) for i in range(len(prompts))]
+with open(Path(filename).with_suffix('.json'), 'w') as f:
+    json.dump({'prompts':prompts, 'images':images, 'results':results}, f, indent=4)
+```
+
+<details><summary>Click to expand output</summary><pre>
+The discussion on the LLaMA 3.1 model has sparked a variety of reactions and interpretations within the community. The model's potential for 128k context and multimodal capabilities has generated excitement, with some users expressing hope for its release. However, there is skepticism regarding the authenticity of the information, as the link provided is not from an official Hugging Face repository. The possibility of multimodal features being part of LLaMA 4 instead of LLaMA 3.1 has been suggested, leading to further confusion. The community is divided on whether the model's release is imminent or not, with some users questioning the timing and others eagerly anticipating its arrival. The benchmarks shared by users have been scrutinized, with some pointing out inconsistencies and others defending their validity. The thread also touches upon the broader implications of such AI advancements, including the impact on the industry and the potential for future innovations. Despite the differing viewpoints, there is a consensus that the AI field is rapidly evolving, and the community is closely watching for any official announcements from Meta.<|end|>
+
+The discussion on the feasibility of running the 405B model locally has sparked a variety of opinions within the community. While some users express skepticism about the possibility, citing the model's size and the limitations of current hardware, others are optimistic, pointing to advancements in technology that could make it viable. The debate centers around the technical requirements for running such a model, including the necessary hardware specifications and the potential for optimization through techniques like quantization. There is a consensus that significant technical challenges exist, but the community is divided on whether these can be overcome in the near future. The conversation also touches on the broader implications of model size and performance, with some users questioning the practicality of running large models on local machines. Despite the differing viewpoints, there is a shared understanding that the discussion is ongoing and that advancements in technology may eventually change the current limitations. The community is actively seeking solutions and is hopeful that future developments will make running large models like 405B more accessible.<|end|>
+
+The discussion on Instruction tuned models, specifically comparing Llama 3.1 8B and 70B, has sparked a variety of opinions within the community. Some users have noted that the 70B model outperforms the 8B model in certain benchmarks, such as HumanEval, despite the 8B model having a higher score in general benchmarks. This has led to a debate on the relevance of these benchmarks, with some users suggesting that they may be less indicative of model performance due to their simplicity. The consensus on the effect of distillation on model performance is mixed, with some users observing that distilled models like 70B may perform differently compared to their predecessors. The community is divided on whether these differences are significant enough to warrant a shift in model choice for production use cases. The discussion also touches on the impact of longer context on model performance, with some users suggesting that it may lead to performance degradation. Overall, the community is grappling with the implications of these findings and how they should influence the choice of models for different applications.<|end|>
+</pre></details><br>
+
+This example demonstrates how to use Phi-3-MLX to generate summaries of Reddit posts and their comments, including both textual content and associated images. It showcases the model's ability to process and synthesize information from multi-modal online discussions.
 
 ## Benchmarks
 
@@ -316,11 +346,12 @@ benchmark()
 
 | Task                  | Vanilla Model | Quantized Model | Quantized Cache | LoRA Adapter |
 |-----------------------|---------------|-----------------|-----------------|--------------|
-| Text Generation       |  8.46 tps     |  51.69 tps      |  6.94 tps       |  8.58 tps    |
-| Image Captioning      |  7.72 tps     |  33.10 tps      |  1.75 tps       |  7.11 tps    |
-| Batched Generation    |  103.47 tps     |  182.83 tps      |  38.72 tps       |  101.02 tps    |
+| Text Generation       |  8.67 tps     |  54.37 tps      |  7.75 tps       |  8.67 tps    |
+| Image Captioning      |  7.84 tps     |  33.37 tps      |  2.87 tps       |  7.61 tps    |
+| Batched Generation    |  104.86 tps     |  184.39 tps      |  75.76 tps       |  94.49 tps    |
 
 *(On M1 Max 64GB)*
+
 
 ## Documentation
 
