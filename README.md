@@ -76,6 +76,8 @@ generate(prompts, max_tokens=100, blind_model=True)
 ### Constrained Beam Decoding
 
 ```python
+from phi_3_vision_mlx import constrain
+
 # Use constrain for structured generation (e.g., code, function calls, multiple-choice)
 prompts = [
     "A 20-year-old woman presents with menorrhagia for the past several years. She says that her menses “have always been heavy”, and she has experienced easy bruising for as long as she can remember. Family history is significant for her mother, who had similar problems with bruising easily. The patient's vital signs include: heart rate 98/min, respiratory rate 14/min, temperature 36.1°C (96.9°F), and blood pressure 110/87 mm Hg. Physical examination is unremarkable. Laboratory tests show the following: platelet count 200,000/mm3, PT 12 seconds, and PTT 43 seconds. Which of the following is the most likely cause of this patient’s symptoms? A: Factor V Leiden B: Hemophilia A C: Lupus anticoagulant D: Protein C deficiency E: Von Willebrand disease",
@@ -158,13 +160,13 @@ test_lora(adapter_path="/path/to/your/lora/adapter")  # With specific adapter
 3. Receive JSON responses with generated text for each prompt:
 
    ```json
-   {
-     "model": "phi-3-vision",
-     "responses": [
-       "Response to 'Hello, world!'",
-       "Response to 'Guten tag!'"
-     ]
-   }
+    {
+      "model": "phi-3-vision", 
+      "responses": [
+        "Hello! How can I help you today?<|end|>", 
+        "Guten Tag! Wie kann ich Ihnen helfen?<|end|>"
+      ]
+    }
    ```
 
 ## 3. Agent Interactions
