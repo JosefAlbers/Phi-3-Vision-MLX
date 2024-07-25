@@ -129,7 +129,8 @@ class LoRALinear(nn.Module): # https://github.com/ml-explore/mlx-examples/blob/m
     def __call__(self, x):
         y = self.linear(x)
         z = (self.dropout(x) @ self.lora_a) @ self.lora_b
-        return y + (self.scale * z).astype(x.dtype)
+        z = y + (self.scale * z)
+        return z.astype(x.dtype)
 
 class ClipAttention(nn.Module):
     def __init__(self, dims, num_heads, bias=True):
@@ -421,29 +422,6 @@ def _rotate_half(x, cos, sin):
     result = (x * cos) + (mx.concatenate([-x2, x1], axis = -1) * sin)
     return result.astype(x.dtype)
 
-@mx.compile
-def _split_transpose(B, L, qkv, chop_1, chop_2, n_heads, n_kv_heads, sin, cos, mask, n_beam):
-    queries, keys, values = mx.split(qkv, [chop_1, chop_2], axis=-1)
-    queries = queries.reshape(B, L, n_heads, -1).transpose(0, 2, 1, 3)
-    keys = keys.reshape(B, L, n_kv_heads, -1).transpose(0, 2, 1, 3)
-    values = values.reshape(B, L, n_kv_heads, -1).transpose(0, 2, 1, 3)
-    if n_beam > 1:
-        sin = mx.repeat(sin, repeats=n_beam, axis=0)
-        cos = mx.repeat(cos, repeats=n_beam, axis=0)
-        mask = mx.repeat(mask, repeats=n_beam, axis=0)
-    queries = _rotate_half(queries, cos, sin)
-    keys = _rotate_half(keys, cos, sin)
-    return queries, keys, values, sin, cos, mask
-
-@mx.compile
-def _scaled_dot(B, L, queries, keys, values, cos, sin, mask, n_beam, scale):
-    scores = (queries * scale) @ keys.transpose(0, 1, 3, 2)
-    scores += mask
-    scores = mx.softmax(scores, axis=-1)
-    output = scores @ values
-    output = output.transpose(0, 2, 1, 3).reshape(B, L, -1)
-    return output
-
 class Phi3Attention(nn.Module):
     def __init__(self, config):
         super().__init__()
@@ -462,10 +440,23 @@ class Phi3Attention(nn.Module):
     def __call__(self, x, cache, cos, sin, mask, n_beam):
         B, L, _ = x.shape
         qkv = self.qkv_proj(x)
-        q, k, v, sin, cos, mask = _split_transpose(B, L, qkv, self.chop_1, self.chop_2, self.n_heads, self.n_kv_heads, sin, cos, mask, n_beam)
+        q, k, v = mx.split(qkv, [self.chop_1, self.chop_2], axis=-1)
+        q = q.reshape(B, L, self.n_heads, -1).transpose(0, 2, 1, 3)
+        k = k.reshape(B, L, self.n_kv_heads, -1).transpose(0, 2, 1, 3)
+        v = v.reshape(B, L, self.n_kv_heads, -1).transpose(0, 2, 1, 3)
+        if n_beam > 1:
+            sin = mx.repeat(sin, repeats=n_beam, axis=0)
+            cos = mx.repeat(cos, repeats=n_beam, axis=0)
+            mask = mx.repeat(mask, repeats=n_beam, axis=0)
+        q = _rotate_half(q, cos, sin)
+        k = _rotate_half(k, cos, sin)
         k, v = cache(k, v, n_beam)
-        o = _scaled_dot(B, L, q, k, v, cos, sin, mask, n_beam, self.scale)
-        return self.o_proj(o)
+        scores = (q * self.scale) @ k.transpose(0, 1, 3, 2)
+        scores += mask
+        scores = mx.softmax(scores, axis=-1)
+        output = scores @ v
+        output = output.transpose(0, 2, 1, 3).reshape(B, L, -1)
+        return self.o_proj(output)
 
 class Phi3MLP(nn.Module):
     def __init__(self, config):
@@ -532,10 +523,7 @@ class KVCache:
                 raise NotImplementedError('Beam Search is not yet compatible with Quantized Cache')
             kv = mx.repeat(self.kv[:,:,:,:self.offset,:], repeats=n_beam, axis=1)
             return mx.concatenate([kv[0], keys], axis=-2), mx.concatenate([kv[1], values], axis=-2)
-        _, _, L, _ = keys.shape
-        new_offset = self.offset + L
         if self.use_quantized_cache:
-            self.offset = new_offset
             _, B, N, _, D = self.shape
             if self.kv is None:
                 self.kv = (mx.quantize(keys.reshape((B*N,-1)), group_size=32), mx.quantize(values.reshape((B*N,-1)), group_size=32))
@@ -547,10 +535,10 @@ class KVCache:
             keys = mx.concatenate([k_cache] + self.keys, axis=2)
             values = mx.concatenate([v_cache] + self.values, axis=2)
             return keys, values
-
         else:
             if self.kv is None:
                 self.kv = mx.zeros(self.shape, dtype=keys.dtype)
+            new_offset = self.offset + keys.shape[2]
             self.kv[0,:,:,self.offset:new_offset,:] = keys
             self.kv[1,:,:,self.offset:new_offset,:] = values
             self.offset = new_offset
@@ -596,7 +584,6 @@ class Phi3F(nn.Module):
         mx.eval(mask, cos, sin)
         for i, l in enumerate(self.layers):
             x = l(x, cache[i], cos, sin, mask, n_beam)
-
         if advance_offset is not None:
             for c in cache:
                 c.offset = past_L + advance_offset

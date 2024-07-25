@@ -74,7 +74,9 @@ agent('DVT ppx for this pt?')
 agent("The patient's prognosis?")
 agent.end()
 
-# Misc
+# Examples
+
+## Reddit summarizer
 pv.add_text('How to inspect API endpoints? @https://raw.githubusercontent.com/gradio-app/gradio/main/guides/08_gradio-clients-and-lite/01_getting-started-with-the-python-client.md')
 pv.rag('Comparison of Sortino Ratio for Bitcoin and Ethereum.')
 

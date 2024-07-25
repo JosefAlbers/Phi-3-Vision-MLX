@@ -14,6 +14,16 @@ Phi-3-MLX is a versatile AI framework that leverages both the Phi-3-Vision multi
 - LoRA fine-tuning capabilities
 - API integration for extended functionality (e.g., image generation, text-to-speech)
 
+## Minimum Requirements
+
+Phi-3-MLX is designed to run on Apple Silicon Macs. The minimum requirements are:
+
+- Apple Silicon Mac (M1, M2, or later)
+- macOS 11.0 or later
+- 8GB RAM (with quantization using `quantize_model=True` option)
+
+For optimal performance, especially when working with larger models or datasets, we recommend using a Mac with 16GB RAM or more.
+
 ## Quick Start
 
 Install and launch Phi-3-MLX from command line:
@@ -37,94 +47,6 @@ from phi_3_vision_mlx import generate
 generate('What is shown in this image?', 'https://collectionapi.metmuseum.org/api/collection/v1/iiif/344291/725918/main-image')
 ```
 
-### Batch Text Generation
-
-```python
-# A list of prompts for batch generation
-prompts = [
-    "Explain the key concepts of quantum computing and provide a Rust code example demonstrating quantum superposition.",
-    "Write a poem about the first snowfall of the year.",
-    "Summarize the major events of the French Revolution.",
-    "Describe a bustling alien marketplace on a distant planet with unique goods and creatures."
-    "Implement a basic encryption algorithm in Python.",
-]
-# Generate responses using Phi-3-Vision (multimodal model)
-generate(prompts, max_tokens=100)
-
-# Generate responses using Phi-3-Mini-128K (language-only model)
-generate(prompts, max_tokens=100, blind_model=True)
-```
-
-### Constrained (Beam Search) Decoding
-
-The `constrain` function allows for structured generation, which can be useful for tasks like code generation, function calling, chain-of-thought prompting, or multiple-choice question answering.
-
-```python
-from phi_3_vision_mlx import constrain
-
-# Define the prompt
-prompt = "Write a Python function to calculate the Fibonacci sequence up to a given number n."
-
-# Define constraints
-constraints = [
-    (100, "\n```python\n"), # Start of code block
-    (100, " return "),      # Ensure a return statement
-    (200, "\n```"),         # End of code block
-]
-
-# Apply constrained decoding using the 'constrain' function from phi_3_vision_mlx.
-constrain(prompt, constraints)
-```
-
-The `constrain` function can also guide the model to provide reasoning before concluding with an answer. This approach can be especially helpful for multiple-choice questions, such as those in the Massive Multitask Language Understanding (MMLU) benchmark, where the model's thought process is as crucial as its final selection.
-
-```python
-prompts = [
-    "A 20-year-old woman presents with menorrhagia for the past several years. She says that her menses “have always been heavy”, and she has experienced easy bruising for as long as she can remember. Family history is significant for her mother, who had similar problems with bruising easily. The patient's vital signs include: heart rate 98/min, respiratory rate 14/min, temperature 36.1°C (96.9°F), and blood pressure 110/87 mm Hg. Physical examination is unremarkable. Laboratory tests show the following: platelet count 200,000/mm3, PT 12 seconds, and PTT 43 seconds. Which of the following is the most likely cause of this patient’s symptoms? A: Factor V Leiden B: Hemophilia A C: Lupus anticoagulant D: Protein C deficiency E: Von Willebrand disease",
-    "A 25-year-old primigravida presents to her physician for a routine prenatal visit. She is at 34 weeks gestation, as confirmed by an ultrasound examination. She has no complaints, but notes that the new shoes she bought 2 weeks ago do not fit anymore. The course of her pregnancy has been uneventful and she has been compliant with the recommended prenatal care. Her medical history is unremarkable. She has a 15-pound weight gain since the last visit 3 weeks ago. Her vital signs are as follows: blood pressure, 148/90 mm Hg; heart rate, 88/min; respiratory rate, 16/min; and temperature, 36.6℃ (97.9℉). The blood pressure on repeat assessment 4 hours later is 151/90 mm Hg. The fetal heart rate is 151/min. The physical examination is significant for 2+ pitting edema of the lower extremity. Which of the following tests o should confirm the probable condition of this patient? A: Bilirubin assessment B: Coagulation studies C: Hematocrit assessment D: Leukocyte count with differential E: 24-hour urine protein"
-]
-# Apply vanilla constrained decoding
-constrain(prompts, constraints=[(30, ' The correct answer is'), (10, 'X.')], blind_model=True, quantize_model=True, use_beam=False)
-
-# Apply constrained beam decoding (ACB)
-constrain(prompts, constraints=[(30, ' The correct answer is'), (10, 'X.')], blind_model=True, quantize_model=True, use_beam=True)
-```
-
-The constraints encourage a structured response that includes the thought process, making the output more informative and transparent:
-
-```
-< Generated text for prompt #0 >
-The most likely cause of this patient's menorrhagia and easy bruising is E: Von Willebrand disease. The correct answer is Von Willebrand disease.
-
-< Generated text for prompt #1 >
-The patient's hypertension, edema, and weight gain are concerning for preeclampsia. The correct answer is E: 24-hour urine protein.
-```
-
-### Multiple Choice Selection
-
-The `choose` function provides a straightforward way to select the best option from a set of choices for a given prompt. This is particularly useful for multiple-choice questions or decision-making scenarios.
-
-```python
-from phi_3_vision_mlx import choose
-
-prompt = "What is the capital of France? A: London B: Berlin C: Paris D: Madrid E: Rome"
-result = choose(prompt)
-print(result)  # Output: 'C'
-
-# Using with custom choices
-custom_prompt = "Which color is associated with stopping at traffic lights? R: Red Y: Yellow G: Green"
-custom_result = choose(custom_prompt, choices='RYG')
-print(custom_result)  # Output: 'R'
-
-# Batch processing
-prompts = [
-    "What is the largest planet in our solar system? A: Earth B: Mars C: Jupiter D: Saturn",
-    "Which element has the chemical symbol 'O'? A: Osmium B: Oxygen C: Gold D: Silver"
-]
-batch_results = choose(prompts)
-print(batch_results)  # Output: ['C', 'B']
-```
-
 ### Model and Cache Quantization
 
 ```python
@@ -135,13 +57,59 @@ generate("Describe the water cycle.", quantize_model=True)
 generate("Explain quantum computing.", quantize_cache=True)
 ```
 
-### (Q)LoRA Fine-tuning
+### Batch Text Generation
 
-Training a LoRA Adapter
+```python
+# A list of prompts for batch generation
+prompts = [
+    "Write a haiku about spring.",
+    "Explain the theory of relativity.",
+    "Describe a futuristic city."
+]
+# Generate responses using Phi-3-Vision (multimodal model)
+generate(prompts, max_tokens=100)
+
+# Generate responses using Phi-3-Mini-128K (language-only model)
+generate(prompts, max_tokens=100, blind_model=True)
+```
+
+### Constrained Beam Decoding
+
+```python
+# Use constrain for structured generation (e.g., code, function calls, multiple-choice)
+prompts = [
+    "A 20-year-old woman presents with menorrhagia for the past several years. She says that her menses “have always been heavy”, and she has experienced easy bruising for as long as she can remember. Family history is significant for her mother, who had similar problems with bruising easily. The patient's vital signs include: heart rate 98/min, respiratory rate 14/min, temperature 36.1°C (96.9°F), and blood pressure 110/87 mm Hg. Physical examination is unremarkable. Laboratory tests show the following: platelet count 200,000/mm3, PT 12 seconds, and PTT 43 seconds. Which of the following is the most likely cause of this patient’s symptoms? A: Factor V Leiden B: Hemophilia A C: Lupus anticoagulant D: Protein C deficiency E: Von Willebrand disease",
+    "A 25-year-old primigravida presents to her physician for a routine prenatal visit. She is at 34 weeks gestation, as confirmed by an ultrasound examination. She has no complaints, but notes that the new shoes she bought 2 weeks ago do not fit anymore. The course of her pregnancy has been uneventful and she has been compliant with the recommended prenatal care. Her medical history is unremarkable. She has a 15-pound weight gain since the last visit 3 weeks ago. Her vital signs are as follows: blood pressure, 148/90 mm Hg; heart rate, 88/min; respiratory rate, 16/min; and temperature, 36.6℃ (97.9℉). The blood pressure on repeat assessment 4 hours later is 151/90 mm Hg. The fetal heart rate is 151/min. The physical examination is significant for 2+ pitting edema of the lower extremity. Which of the following tests o should confirm the probable condition of this patient? A: Bilirubin assessment B: Coagulation studies C: Hematocrit assessment D: Leukocyte count with differential E: 24-hour urine protein"
+]
+
+# Define constraints for the generated text
+constraints=[(30, ' The correct answer is'), (10, 'X.')]
+
+# Apply constrained beam decoding
+results = constrain(prompts, constraints, blind_model=True, quantize_model=True, use_beam=True)
+```
+
+### Multiple Choice Question Answering
+
+```python
+from phi_3_vision_mlx import choose
+
+# Select best option from choices for given prompts
+prompts = [
+    "What is the largest planet in our solar system? A: Earth B: Mars C: Jupiter D: Saturn",
+    "Which element has the chemical symbol 'O'? A: Osmium B: Oxygen C: Gold D: Silver"
+]
+
+# For multiple-choice or decision-making tasks
+choose(prompts)
+```
+
+### LoRA Fine-tuning
 
 ```python
 from phi_3_vision_mlx import train_lora
 
+# Train a LoRA adapter
 train_lora(
     lora_layers=5,  # Number of layers to apply LoRA
     lora_rank=16,   # Rank of the LoRA adaptation
@@ -150,37 +118,56 @@ train_lora(
     warmup=0.5,     # Fraction of steps for learning rate warmup
     dataset_path="JosefAlbers/akemiH_MedQA_Reason"
 )
-```
 
-![Alt text](https://raw.githubusercontent.com/JosefAlbers/Phi-3-Vision-MLX/main/assets/train_log.png)
-
-Generating Text with LoRA
-
-```python
+# Generate text using the trained LoRA adapter
 generate("Describe the potential applications of CRISPR gene editing in medicine.",
     blind_model=True,
     quantize_model=True,
     use_adapter=True)
+
+# Compare LoRA adapters
+test_lora(adapter_path=None)  # Without LoRA adapter
+test_lora(adapter_path=True)  # With default LoRA adapter
+test_lora(adapter_path="/path/to/your/lora/adapter")  # With specific adapter
 ```
 
-Comparing LoRA Adapters
+![Alt text](https://raw.githubusercontent.com/JosefAlbers/Phi-3-Vision-MLX/main/assets/train_log.png)
 
-```python
-from phi_3_vision_mlx import test_lora
+## 2. HTTP Model Server
 
-# Test model without LoRA adapter
-test_lora(adapter_path=None)
-# Output score: 0.6 (6/10)
+1. Start the server:
 
-# Test model with the trained LoRA adapter (using default path)
-test_lora(adapter_path=True)
-# Output score: 0.8 (8/10)
+   ```
+   python server.py
+   ```
 
-# Test model with a specific LoRA adapter path
-test_lora(adapter_path="/path/to/your/lora/adapter")
-```
+2. Send POST requests to `http://localhost:8000/v1/completions` with a JSON body:
 
-## 2. Agent Interactions
+   ```bash
+   curl -X POST http://localhost:8000/v1/completions \
+     -H "Content-Type: application/json" \
+     -d '{
+       "prompt": [
+           "Hello, world!",
+           "Guten tag!"
+       ],
+       "max_tokens": 50
+     }'
+   ```
+
+3. Receive JSON responses with generated text for each prompt:
+
+   ```json
+   {
+     "model": "phi-3-vision",
+     "responses": [
+       "Response to 'Hello, world!'",
+       "Response to 'Guten tag!'"
+     ]
+   }
+   ```
+
+## 3. Agent Interactions
 
 ### Multi-turn Conversation
 
@@ -196,7 +183,7 @@ agent('Analyze this image and describe the architectural style:', 'https://image
 # Second interaction: Follow-up question
 agent('What historical period does this architecture likely belong to?')
 
-# End the conversation: This clears the agent's memory and prepares it for a new conversation
+# End conversation, clear memory for new interaction
 agent.end()
 ```
 
@@ -229,9 +216,9 @@ agent.end()
 
 ![Alt text](https://raw.githubusercontent.com/JosefAlbers/Phi-3-Vision-MLX/main/assets/api_agent.png)
 
-## 3. Custom Toolchains
+## 4. Custom Toolchains
 
-### Example 1. In-Context Learning Agent
+### In-Context Learning Agent
 
 ```python
 from phi_3_vision_mlx import add_text
@@ -249,7 +236,7 @@ agent = Agent(toolchain, early_stop=100)
 agent('How to inspect API endpoints? @https://raw.githubusercontent.com/gradio-app/gradio/main/guides/08_gradio-clients-and-lite/01_getting-started-with-the-python-client.md')
 ```
 
-### Example 2. Retrieval Augmented Coding Agent
+### Retrieval Augmented Coding Agent
 
 ```python
 from phi_3_vision_mlx import VDB
@@ -279,7 +266,7 @@ agent = Agent(toolchain_plot, False)
 _, images = agent(user_input)
 ```
 
-### Example 3. Multi-Agent Interaction
+### Multi-Agent Interaction
 
 ```python
 # Continued from Example 2 above
@@ -287,7 +274,7 @@ agent_writer = Agent(early_stop=100)
 agent_writer(f'Write a stock analysis report on: {user_input}', images)
 ```
 
-### Example 4. External LLM Integration
+### External LLM Integration
 
 ```python
 # Create Agent with Mistral-7B-Instruct-v0.3 instead
@@ -298,43 +285,12 @@ agent('Write a neurology ICU admission note.')
 
 # Follow-up questions (multi-turn conversation)
 agent('Give me the inpatient BP goal for this patient.')
-agent('DVT ppx for this pt?')
-agent("What is the pt's px?")
+agent('DVT ppx for this patient?')
+agent("Patient's prognosis?")
 
 # End
 agent.end()
 ```
-
-## Examples
-
-For more advanced and detailed examples, including multi-modal processing and integration with external libraries, please see the examples.py file in the root directory of this project. 
-
-Here's a quick preview of what you can find in examples.py:
-
-```python
-# Multimodal Reddit Thread Summarization
-
-from rd2md import rd2md
-from pathlib import Path
-import json
-
-filename, contents, images = rd2md()
-prompt = 'Write an executive summary of above (max 200 words). The article should capture the diverse range of opinions and key points discussed in the thread, presenting a balanced view of the topic without quoting specific users or comments directly. Focus on organizing the information cohesively, highlighting major arguments, counterarguments, and any emerging consensus or unresolved issues within the community.'
-prompts = [f'{s}\n\n{prompt}' for s in contents]
-results = [generate(prompts[i], images[i], max_tokens=512, blind_model=False, quantize_model=True, quantize_cache=False, verbose=False) for i in range(len(prompts))]
-with open(Path(filename).with_suffix('.json'), 'w') as f:
-    json.dump({'prompts':prompts, 'images':images, 'results':results}, f, indent=4)
-```
-
-<details><summary>Click to expand output</summary><pre>
-The discussion on the LLaMA 3.1 model has sparked a variety of reactions and interpretations within the community. The model's potential for 128k context and multimodal capabilities has generated excitement, with some users expressing hope for its release. However, there is skepticism regarding the authenticity of the information, as the link provided is not from an official Hugging Face repository. The possibility of multimodal features being part of LLaMA 4 instead of LLaMA 3.1 has been suggested, leading to further confusion. The community is divided on whether the model's release is imminent or not, with some users questioning the timing and others eagerly anticipating its arrival. The benchmarks shared by users have been scrutinized, with some pointing out inconsistencies and others defending their validity. The thread also touches upon the broader implications of such AI advancements, including the impact on the industry and the potential for future innovations. Despite the differing viewpoints, there is a consensus that the AI field is rapidly evolving, and the community is closely watching for any official announcements from Meta.<|end|>
-
-The discussion on the feasibility of running the 405B model locally has sparked a variety of opinions within the community. While some users express skepticism about the possibility, citing the model's size and the limitations of current hardware, others are optimistic, pointing to advancements in technology that could make it viable. The debate centers around the technical requirements for running such a model, including the necessary hardware specifications and the potential for optimization through techniques like quantization. There is a consensus that significant technical challenges exist, but the community is divided on whether these can be overcome in the near future. The conversation also touches on the broader implications of model size and performance, with some users questioning the practicality of running large models on local machines. Despite the differing viewpoints, there is a shared understanding that the discussion is ongoing and that advancements in technology may eventually change the current limitations. The community is actively seeking solutions and is hopeful that future developments will make running large models like 405B more accessible.<|end|>
-
-The discussion on Instruction tuned models, specifically comparing Llama 3.1 8B and 70B, has sparked a variety of opinions within the community. Some users have noted that the 70B model outperforms the 8B model in certain benchmarks, such as HumanEval, despite the 8B model having a higher score in general benchmarks. This has led to a debate on the relevance of these benchmarks, with some users suggesting that they may be less indicative of model performance due to their simplicity. The consensus on the effect of distillation on model performance is mixed, with some users observing that distilled models like 70B may perform differently compared to their predecessors. The community is divided on whether these differences are significant enough to warrant a shift in model choice for production use cases. The discussion also touches on the impact of longer context on model performance, with some users suggesting that it may lead to performance degradation. Overall, the community is grappling with the implications of these findings and how they should influence the choice of models for different applications.<|end|>
-</pre></details><br>
-
-This example demonstrates how to use Phi-3-MLX to generate summaries of Reddit posts and their comments, including both textual content and associated images. It showcases the model's ability to process and synthesize information from multi-modal online discussions.
 
 ## Benchmarks
 
@@ -346,12 +302,29 @@ benchmark()
 
 | Task                  | Vanilla Model | Quantized Model | Quantized Cache | LoRA Adapter |
 |-----------------------|---------------|-----------------|-----------------|--------------|
-| Text Generation       |  8.67 tps     |  54.37 tps      |  7.75 tps       |  8.67 tps    |
-| Image Captioning      |  7.84 tps     |  33.37 tps      |  2.87 tps       |  7.61 tps    |
-| Batched Generation    |  104.86 tps     |  184.39 tps      |  75.76 tps       |  94.49 tps    |
+| Text Generation       |  8.71 tps     |  54.59 tps      |  7.76 tps       |  8.68 tps    |
+| Image Captioning      |  7.83 tps     |  33.44 tps      |  2.86 tps       |  7.62 tps    |
+| Batched Generation    |  105.41 tps     |  185.29 tps      |  75.63 tps       |  92.08 tps    |
 
 *(On M1 Max 64GB)*
 
+## More Examples
+
+For advanced examples and external library integration, see `examples.py` in the project root. Preview:
+
+```python
+# Multimodal Reddit Thread Summarization
+from rd2md import rd2md
+from pathlib import Path
+import json
+
+filename, contents, images = rd2md()
+prompt = 'Write an executive summary of above (max 200 words). The article should capture the diverse range of opinions and key points discussed in the thread, presenting a balanced view of the topic without quoting specific users or comments directly. Focus on organizing the information cohesively, highlighting major arguments, counterarguments, and any emerging consensus or unresolved issues within the community.'
+prompts = [f'{s}\n\n{prompt}' for s in contents]
+results = [generate(prompts[i], images[i], max_tokens=512, blind_model=False, quantize_model=True, quantize_cache=False, verbose=False) for i in range(len(prompts))]
+with open(Path(filename).with_suffix('.json'), 'w') as f:
+    json.dump({'prompts':prompts, 'images':images, 'results':results}, f, indent=4)
+```
 
 ## Documentation
 
