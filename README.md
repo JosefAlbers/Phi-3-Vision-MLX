@@ -109,7 +109,7 @@ choose(prompts)
 ### LoRA Fine-tuning
 
 ```python
-from phi_3_vision_mlx import train_lora
+from phi_3_vision_mlx import train_lora, test_lora
 
 # Train a LoRA adapter
 train_lora(
@@ -128,9 +128,9 @@ generate("Describe the potential applications of CRISPR gene editing in medicine
     use_adapter=True)
 
 # Compare LoRA adapters
-test_lora(adapter_path=None)  # Without LoRA adapter
-test_lora(adapter_path=True)  # With default LoRA adapter
-test_lora(adapter_path="/path/to/your/lora/adapter")  # With specific adapter
+test_lora(adapter_path=None)                  # Without LoRA adapter
+test_lora(adapter_path=True)                  # With default LoRA adapter
+test_lora(adapter_path="/path/to/your/lora")  # With specific adapter
 ```
 
 ![Alt text](https://raw.githubusercontent.com/JosefAlbers/Phi-3-Vision-MLX/main/assets/train_log.png)
@@ -315,7 +315,7 @@ benchmark()
 For advanced examples and external library integration, see `examples.py` in the project root. Preview:
 
 ```python
-# Multimodal Reddit Thread Summarization
+# Multimodal Reddit Thread Summarizer
 from rd2md import rd2md
 from pathlib import Path
 import json

@@ -89,8 +89,10 @@ def save_to_markdown(reddit, subreddit_name, limit, score_threshold, comment_thr
                 post_content.append(f"* Author: u/{post.author}\n")
                 post_content.append(f"* URL: {post.url}\n")
                 post_content.append(f"* Score: {post.score}\n\n")
+            post_content.append("### Post:\n\n")
             if post.is_self:
                 content = post.selftext
+                content = content.replace('\n#', '\n####') # md headings
                 image_urls = extract_image_urls(content)
                 for img_url in image_urls:
                     local_path = download_image(img_url, images_folder)

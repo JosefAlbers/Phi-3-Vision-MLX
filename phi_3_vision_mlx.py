@@ -66,7 +66,7 @@ class Streamer:
     def end(self):
         if self.stream:
             txt = self.tokenizer.decode(self.list_tokens)
-            print(txt[self.idx_sofar:], '\n')
+            print(txt[self.idx_sofar:], '\n', flush=True)
             return txt, len(self.list_tokens)
         else:
             arr_tokens = mx.concatenate(self.list_tokens, axis=1)

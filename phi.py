@@ -420,7 +420,7 @@ def _rotate_half(x, cos, sin):
     midpoint = x.shape[-1] // 2
     x1, x2 = x[..., :midpoint], x[..., midpoint:]
     result = (x * cos) + (mx.concatenate([-x2, x1], axis = -1) * sin)
-    return result.astype(x.dtype)
+    return result
 
 class Phi3Attention(nn.Module):
     def __init__(self, config):
@@ -451,12 +451,13 @@ class Phi3Attention(nn.Module):
         q = _rotate_half(q, cos, sin)
         k = _rotate_half(k, cos, sin)
         k, v = cache(k, v, n_beam)
-        scores = (q * self.scale) @ k.transpose(0, 1, 3, 2)
-        scores += mask
-        scores = mx.softmax(scores, axis=-1)
-        output = scores @ v
-        output = output.transpose(0, 2, 1, 3).reshape(B, L, -1)
-        return self.o_proj(output)
+        w = (q * self.scale) @ k.transpose(0, 1, 3, 2)
+        w += mask
+        w = mx.softmax(w, axis=-1)
+        o = w @ v
+        # o = mx.fast.scaled_dot_product_attention(q,k,v,scale=self.scale,mask=mask)
+        o = o.transpose(0, 2, 1, 3).reshape(B, L, -1)
+        return self.o_proj(o).astype(qkv.dtype)
 
 class Phi3MLP(nn.Module):
     def __init__(self, config):
