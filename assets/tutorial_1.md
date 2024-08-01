@@ -1,58 +1,56 @@
-# Part 1: Porting Phi-3-Vision to MLX
+# Part 1: Basic Implementation of Phi-3-Vision in MLX
 
 ## Introduction
 
-Welcome to Part 1 of our tutorial series on porting Phi-3-Vision from PyTorch to Apple's MLX framework. This guide will walk you through:
+Welcome to Part 1 of the tutorial series on porting Phi-3-Vision from PyTorch to Apple's MLX framework. Our goal today is to create a minimal, functional implementation of Phi-3-Vision in MLX through:
 
 1. Analyzing the original PyTorch code
 2. Translating core components to MLX
 3. Building a basic MLX implementation
 4. Loading and running the ported model
 
-By following this guide, you'll gain an understanding of the process involved in porting AI models to MLX.
+By the end of this tutorial, we will have a basic working model capable of generating text, setting the stage for further optimizations in subsequent parts of the series.
 
 ## 1. Finding and Understanding the Model Code
 
-Our first task is to locate the code file for the original Phi-3-Vision implementation:
+Our first task is to locate the source code for the original Phi-3-Vision implementation:
 
 1. Visit the Hugging Face model hub: https://huggingface.co/models
 2. Search for "phi-3-vision"
 3. Click on the model to access its repository
 4. Look for a file named `modeling_phi3_v.py`
 
-Now open the file:
+Now let's examine the code:
 
-![Alt Text](tutorial_part1_meme_idonteven.gif)
+![idonteven](https://dev-to-uploads.s3.amazonaws.com/uploads/articles/jzsax6junle1e1gv7b7q.gif)
 
-But wait! Before you panic, here's how we'll approach this:
+Don't panic! We will break this down step by step:
 
 1. Scroll to the bottom of the file to find the top-level model class (`Phi3VForCausalLM` in our case)
 2. Look for the `forward` method in this class
 3. Trace the flow of data through the model by following method calls
 
-By following these steps, we can identify five key components:
+Through this process, we can identify five key components of the model:
 
-- Main model (`Phi3VModel`)
-- Decoder layers (`Phi3DecoderLayer`)
-- Attention mechanism (`Phi3Attention`)
-- Feed-forward network (`Phi3MLP`)
-- Image embedding (`Phi3ImageEmbedding`)
+1. Main model (`Phi3VModel`)
+2. Decoder layers (`Phi3DecoderLayer`)
+3. Attention mechanism (`Phi3Attention`)
+4. Feed-forward network (`Phi3MLP`)
+5. Image embedding (`Phi3ImageEmbedding`)
 
-With these key components identified, we're ready to begin the translation process to MLX.
+With these components identified, we're ready to begin the translation process to MLX.
 
-## 2. Differences between PyTorch and MLX
+## 2. MLX-Specific Considerations
 
-As we prepare to port the model, let's review a few differences between PyTorch and MLX that will be helpful in our translation process:
+A few differences between PyTorch and MLX to note before we begin the porting:
 
-1. **Array Creation**: MLX doesn't require specifying device location (e.g., 'CPU', 'GPU').
+1. **Array Creation**: MLX doesn't require specifying device location.
 2. **Lazy Computation**: Arrays in MLX are only materialized when `eval()` is called.
 3. **Model Definition**: MLX uses `__call__` instead of `forward` for the model's forward pass.
 
-Keep these differences in mind as we port Phi-3-Vision to MLX.
-
 ## 3. Understanding the Model Structure
 
-Let's break down the key components of Phi-3-Vision:
+Let's now examine each key component of Phi-3-Vision, translating them to MLX as we go:
 
 ### 3.1 Top-Level Model: Phi3VForCausalLM
 
@@ -68,7 +66,7 @@ class Phi3VForCausalLM(nn.Module):
 
 This top-level class serves two main functions:
 
-1. It encapsulates the core model (`Phi3VModel`), which processes the input and generates contextualized representations.
+1. It encapsulates the core model (`Phi3VModel`), which produces contextualized representations of the input.
 2. It applies a linear transformation (the "language model head") to these representations, converting them into logits over the entire vocabulary. These logits represent the model's predictions for the next token in the sequence.
 
 ### 3.2 Core Model: Phi3VModel
@@ -177,9 +175,7 @@ Key aspects of this implementation:
 1. **Projection and Splitting**: The input is first projected into query (q), key (k), and value (v) representations using a single linear projection (`qkv_proj`), which is then split.
 2. **Multi-head Reshaping**: The q, k, and v tensors are reshaped to separate the heads and prepare for the attention computation.
 3. **Attention Mask**: A causal mask is created to ensure that each position can only attend to previous positions.
-4. **Scaled Dot-Product Attention**: The core attention computation is performed. 
-
-    FYI, MLX provides a faster optimized version of this operation:
+4. **Scaled Dot-Product Attention**: The core attention computation is performed. Alternatively, you can use a faster, optimized version of this operation available in mlx.core.fast:
 
     ```python
     # This:
@@ -196,7 +192,7 @@ Key aspects of this implementation:
 
 The attention mechanism supports both standard multi-head attention and grouped-query attention by allowing different numbers of heads for queries (`n_heads`) versus keys/values (`n_kv_heads`). 
 
-![https://arxiv.org/abs/2305.13245v3](tutorial_part1_gqa.png)
+![https://arxiv.org/abs/2305.13245v3](https://dev-to-uploads.s3.amazonaws.com/uploads/articles/ylsr57hd8kpazjoznxac.png)
 
 In the current configuration, however, these are set to the same value (32), resulting in standard multi-head attention.
 
@@ -301,25 +297,18 @@ print(processor.tokenizer.decode(list_tokens))
 # Output: How are you doing?<|end|>
 ```
 
-And there you have it! We've successfully ported Phi-3-Vision to MLX, loaded the model, and generated text. While this implementation is basic, it demonstrates that our port is functional and capable of generating coherent text.
+And there you have it! We've successfully ported Phi-3-Vision to MLX, loaded the model, and generated text. 
 
-## 5. Limitations and Next Steps
+While this implementation is basic, it demonstrates that our port is functional and capable of generating coherent text.
 
-While we've successfully ported the core structure of Phi-3-Vision to MLX, several key features are yet to be implemented:
+## 5. Limitations
 
-1. **Position Encoding**: For encoding token positions in long contexts.
-2. **Key-Value Caching**: For efficient autoregressive generation.
-3. **Batch Processing**: For handling multiple inputs simultaneously.
+Our minimal implementation works for short sequences, but you'll notice it starts producing gibberish with longer contexts. This is because we haven't yet implemented position encoding, which we'll address in the next part with RoPE (Rotary Position Embedding).
 
-These will be addressed in upcoming tutorials. Stay tuned as we continue to refine and enhance our MLX implementation of Phi-3-Vision!
+## Conclusion:
 
-## Conclusion
+We've successfully created a barebones implementation of Phi-3-Vision in MLX. While it's not yet fully functional, it provides a solid foundation for the optimizations we'll explore in upcoming tutorials.
 
-In this tutorial, we've laid the groundwork for porting Phi-3-Vision to MLX:
+## Next Steps:
 
-1. We analyzed the original model's architecture and core components.
-2. We translated these components to MLX, adapting to its unique features.
-3. We implemented a basic version of the model capable of text generation.
-4. We loaded the model and demonstrated simple text generation.
-
-The full implementation is available at https://github.com/JosefAlbers/Phi-3-Vision-MLX/tree/main/assets/tutorial_1.py
+In Part 2, we'll implement Su-scaled Rotary Position Embeddings (RoPE) to enhance our model's ability to handle long sequences.
