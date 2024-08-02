@@ -7,6 +7,8 @@ from huggingface_hub import snapshot_download
 import mlx.core as mx
 import mlx.nn as nn
 import numpy as np
+from typing import List, Union
+import math
 
 class ClipAttention(nn.Module):
     def __init__(self, dims, num_heads, bias=True):
@@ -147,6 +149,38 @@ class Phi3ImageEmbedding(nn.Module):
             idx += cnt
         return txt_embeds
 
+class SuRoPE:
+    def __init__(self, config):
+        self.dim = config.hidden_size // config.num_attention_heads
+        self.original_max_position_embeddings = config.original_max_position_embeddings
+        self.rope_theta = config.rope_theta
+        self.scaling_factor = math.sqrt(1 + math.log(config.max_position_embeddings / config.original_max_position_embeddings) / math.log(config.original_max_position_embeddings))
+        self.long_factor = config.rope_scaling["long_factor"]
+        self.short_factor = config.rope_scaling["short_factor"]
+
+    def __call__(self, q, k, position_ids):
+        cos, sin = self._get_cos_sin(position_ids)
+        q = (q * cos) + (self._rotate_half(q) * sin)
+        k = (k * cos) + (self._rotate_half(k) * sin)
+        return q, k
+
+    def _get_cos_sin(self, position_ids):
+        su_factor = self.long_factor if mx.max(position_ids) > self.original_max_position_embeddings else self.short_factor
+        position_ids_expanded = position_ids[:, None, :]
+        inv_freq = 1.0 / (mx.array(su_factor, dtype=mx.float32) * self.rope_theta**(mx.arange(0, self.dim, 2, dtype=mx.float32) / self.dim))
+        inv_freq_expanded = mx.repeat(inv_freq[None, :, None], position_ids.shape[0], axis=0)
+        freqs = (inv_freq_expanded @ position_ids_expanded).transpose(0, 2, 1)
+        emb = mx.concatenate([freqs, freqs], axis=-1)
+        cos = mx.expand_dims(mx.cos(emb) * self.scaling_factor, axis=1)
+        sin = mx.expand_dims(mx.sin(emb) * self.scaling_factor, axis=1)
+        return cos, sin
+
+    @staticmethod
+    def _rotate_half(x):
+        midpoint = x.shape[-1] // 2
+        x1, x2 = x[..., :midpoint], x[..., midpoint:]
+        return mx.concatenate([-x2, x1], axis=-1)
+
 class Phi3Attention(nn.Module):
     def __init__(self, config):
         super().__init__()
@@ -162,15 +196,21 @@ class Phi3Attention(nn.Module):
         op_size = n_heads * head_dim + 2 * (n_kv_heads * head_dim)
         self.qkv_proj = nn.Linear(dim, op_size, bias=False)
         self.o_proj = nn.Linear(n_heads * head_dim, dim, bias=False)
+        self.rope = SuRoPE(config)
 
-    def __call__(self, x):
+    def __call__(self, x, position_ids, attention_mask):
         B, L, _ = x.shape
         qkv = self.qkv_proj(x)
         q, k, v = mx.split(qkv, self.chop, axis=-1)
         q = q.reshape(B, L, self.n_heads, -1).transpose(0, 2, 1, 3)
         k = k.reshape(B, L, self.n_kv_heads, -1).transpose(0, 2, 1, 3)
         v = v.reshape(B, L, self.n_kv_heads, -1).transpose(0, 2, 1, 3)
+        position_ids = mx.arange(q.shape[2], dtype=mx.float32)[None] if position_ids is None else position_ids
+        q, k = self.rope(q, k, position_ids)
         mask = mx.triu(mx.full((v.shape[2], v.shape[2]), -mx.inf), k=1)
+        if attention_mask is not None:
+            mask += mx.where(attention_mask[:, :, None]*attention_mask[:, None, :]==1, 0, -mx.inf)
+            mask = mx.expand_dims(mask, 1)
         # o = mx.fast.scaled_dot_product_attention(q,k,v,scale=self.scale,mask=mask)
         w = (q * self.scale) @ k.transpose(0, 1, 3, 2)
         w += mask
@@ -198,8 +238,8 @@ class Phi3DecoderLayer(nn.Module):
         self.input_layernorm = nn.RMSNorm(config.hidden_size, eps=config.rms_norm_eps)
         self.post_attention_layernorm = nn.RMSNorm(config.hidden_size, eps=config.rms_norm_eps)
 
-    def __call__(self, x):
-        r = self.self_attn(self.input_layernorm(x))
+    def __call__(self, x, position_ids, attention_mask):
+        r = self.self_attn(self.input_layernorm(x), position_ids, attention_mask)
         h = x + r
         r = self.mlp(self.post_attention_layernorm(h))
         return h + r
@@ -212,11 +252,11 @@ class Phi3VModel(nn.Module):
         self.layers = [Phi3DecoderLayer(config) for _ in range(config.num_hidden_layers)]
         self.norm = nn.RMSNorm(config.hidden_size, eps=config.rms_norm_eps)
 
-    def __call__(self, input_ids, pixel_values, image_sizes):
+    def __call__(self, input_ids, pixel_values, image_sizes, position_ids, attention_mask):
         x = self.embed_tokens(input_ids)
         x = self.vision_embed_tokens(x, pixel_values, image_sizes)
         for l in self.layers:
-            x = l(x)
+            x = l(x, position_ids, attention_mask)
         return self.norm(x)
 
 class Phi3VForCausalLM(nn.Module):
@@ -225,23 +265,26 @@ class Phi3VForCausalLM(nn.Module):
         self.model = Phi3VModel(config)
         self.lm_head = nn.Linear(config.hidden_size, config.vocab_size, bias=False)
 
-    def __call__(self, input_ids, pixel_values=None, image_sizes=None):
-        x = self.model(input_ids, pixel_values, image_sizes)
+    def __call__(self, input_ids, pixel_values=None, image_sizes=None, position_ids=None, attention_mask=None):
+        x = self.model(input_ids, pixel_values, image_sizes, position_ids, attention_mask)
         return self.lm_head(x)
 
-model_id = 'microsoft/Phi-3-vision-128k-instruct'
-model_path = snapshot_download(model_id)
-with open(f"{model_path}/config.json", "r") as f:
-    config = json.load(f)
-model_config = SimpleNamespace(**config)
-model_weight = [(k, v.transpose(0, 2, 3, 1) if "patch_embedding.weight" in k else v) for wf in glob.glob(f"{model_path}/*.safetensors") for k, v in mx.load(wf).items()]
-model = Phi3VForCausalLM(model_config)
-model.load_weights(model_weight)
-mx.eval(model.parameters())
-model.eval()
+def load(model_id = 'microsoft/Phi-3-vision-128k-instruct'):
+    model_path = snapshot_download(model_id)
+    processor = AutoProcessor.from_pretrained(model_id, trust_remote_code=True)
+    with open(f"{model_path}/config.json", "r") as f:
+        config = json.load(f)
+    model_config = SimpleNamespace(**config)
+    model_weight = [(k, v.transpose(0, 2, 3, 1) if "patch_embedding.weight" in k else v) for wf in glob.glob(f"{model_path}/*.safetensors") for k, v in mx.load(wf).items()]
+    model = Phi3VForCausalLM(model_config)
+    model.load_weights(model_weight)
+    mx.eval(model.parameters())
+    model.eval()
+    return model, processor
 
-processor = AutoProcessor.from_pretrained(model_id, trust_remote_code=True)
+model, processor = load()
 
+# Text Only
 inputs = processor('Hello world!', return_tensors='np')
 input_ids = mx.array(inputs['input_ids'])
 logits = model(input_ids)
@@ -253,3 +296,55 @@ for i in range(5):
     token = mx.argmax(logits[:, -1, :], axis=-1)
     list_tokens += token.tolist()
 print(processor.tokenizer.decode(list_tokens))
+# Output: How are you doing today?
+
+# Text + Image
+from PIL import Image
+import requests
+prompt = f"<|user|>\n<|image_1|>\nWhat is shown in this image?<|end|>\n<|assistant|>\n"
+images = [Image.open(requests.get("https://assets-c4akfrf5b4d3f4b7.z01.azurefd.net/assets/2024/04/BMDataViz_661fb89f3845e.png" , stream=True).raw)]
+inputs = processor(prompt, images, return_tensors="np")
+input_ids, pixel_values, image_sizes = [mx.array(inputs[i]) for i in ['input_ids', 'pixel_values', 'image_sizes']]
+logits = model(input_ids, pixel_values, image_sizes)
+token = mx.argmax(logits[:, -1, :], axis=-1)
+list_tokens = token.tolist()
+for i in range(50):
+    input_ids = mx.concatenate([input_ids, token[None]], axis=-1)
+    logits = model(input_ids)
+    token = mx.argmax(logits[:, -1, :], axis=-1)
+    list_tokens += token.tolist()
+print(processor.tokenizer.decode(list_tokens))
+# Output: The image displays a chart with a series of connected dots forming a line that trends upwards, indicating a positive correlation between two variables. The chart is labeled with 'X' on the horizontal axis and 'Y' on the vertical axis,
+
+# Batch
+def pad_to_batch(inputs):
+    input_ids = [i.tolist() for i in inputs['input_ids']]
+    max_length = max(len(sublist) for sublist in input_ids)
+    return inputs|{
+        'input_ids': mx.array([[0]*(max_length-len(sublist)) + sublist for sublist in input_ids]),
+        'position_ids': mx.array([[1]*(max_length-len(sublist)) + list(range(len(sublist))) for sublist in input_ids]),
+        'attention_mask': mx.array([[0]*(max_length-len(sublist)) + [1]*len(sublist) for sublist in input_ids]),
+    }
+
+def update_inputs(inputs, token):
+    input_ids, position_ids, attention_mask = inputs['input_ids'], inputs['position_ids'], inputs['attention_mask']
+    return inputs|{
+        'input_ids': mx.concatenate([input_ids, token[:,None]], axis=-1),
+        'position_ids': mx.concatenate([position_ids, position_ids[:, -1:] + 1], axis=1),
+        'attention_mask': mx.concatenate([attention_mask, mx.ones((input_ids.shape[0], 1), dtype=attention_mask.dtype)], axis=1),
+    }
+
+inputs = processor(['Hello World!', 'Guten Tag!'], return_tensors='np')
+inputs = pad_to_batch(inputs)
+
+logits = model(**inputs)
+token = mx.argmax(logits[:, -1, :], axis=-1)
+list_tokens = [token]
+for i in range(5):
+    inputs = update_inputs(inputs, token)
+    logits = model(**inputs)
+    token = mx.argmax(logits[:, -1, :], axis=-1)
+    list_tokens.append(token)
+list_tokens = mx.stack(list_tokens, axis=1).tolist()
+print(processor.tokenizer.batch_decode(list_tokens))
+# Output: ['How are you doing today?', 'Was möchten Sie w']

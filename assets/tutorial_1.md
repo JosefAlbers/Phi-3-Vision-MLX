@@ -2,7 +2,7 @@
 
 ## Introduction
 
-Welcome to Part 1 of the tutorial series on porting Phi-3-Vision from PyTorch to Apple's MLX framework. Our goal today is to create a minimal, functional implementation of Phi-3-Vision in MLX through:
+Welcome to Part 1 of the tutorial series on porting Phi-3-Vision from PyTorch to Apple's MLX framework. Our goal is to create a minimal functional implementation of Phi-3-Vision in MLX through:
 
 1. Analyzing the original PyTorch code
 2. Translating core components to MLX
@@ -11,9 +11,11 @@ Welcome to Part 1 of the tutorial series on porting Phi-3-Vision from PyTorch to
 
 By the end of this tutorial, we will have a basic working model capable of generating text, setting the stage for further optimizations in subsequent parts of the series.
 
-## 1. Finding and Understanding the Model Code
+The full implementation of this tutorial is available at https://github.com/JosefAlbers/Phi-3-Vision-MLX/tree/main/assets/tutorial_1.py
 
-Our first task is to locate the source code for the original Phi-3-Vision implementation:
+## 1. Analyzing the Source Code
+
+Our first task is to locate the source code for the original Phi-3-Vision:
 
 1. Visit the Hugging Face model hub: https://huggingface.co/models
 2. Search for "phi-3-vision"
@@ -32,11 +34,11 @@ Don't panic! We will break this down step by step:
 
 Through this process, we can identify five key components of the model:
 
-1. Main model (`Phi3VModel`)
-2. Decoder layers (`Phi3DecoderLayer`)
-3. Attention mechanism (`Phi3Attention`)
-4. Feed-forward network (`Phi3MLP`)
-5. Image embedding (`Phi3ImageEmbedding`)
+1. `Phi3VModel`: Main model
+2. `Phi3DecoderLayer`: Decoder layers
+3. `Phi3Attention`: Attention mechanism
+4. `Phi3MLP`: Feed-forward network
+5. `Phi3ImageEmbedding`: Image embedding
 
 With these components identified, we're ready to begin the translation process to MLX.
 
@@ -66,8 +68,8 @@ class Phi3VForCausalLM(nn.Module):
 
 This top-level class serves two main functions:
 
-1. It encapsulates the core model (`Phi3VModel`), which produces contextualized representations of the input.
-2. It applies a linear transformation (the "language model head") to these representations, converting them into logits over the entire vocabulary. These logits represent the model's predictions for the next token in the sequence.
+1. **Encapsulating the core model**: It wraps the `Phi3VModel`, which produces contextualized representations of the input.
+2. **Applying the language model head**: It uses a linear transformation to convert the contextualized representations into logits over the entire vocabulary, representing the model's predictions for the next token in the sequence.
 
 ### 3.2 Core Model: Phi3VModel
 
@@ -211,16 +213,16 @@ class Phi3MLP(nn.Module):
 
 This implements a gated feedforward network:
 
-1. Gated Architecture:
+1. **Gated Architecture**:
    - The input is first projected into two separate spaces: one for the 'gate' and one for the 'values'.
    - This is achieved through a single linear projection followed by a split operation.
-2. Activation Function:
+2. **Activation Function**:
    - The gate portion uses the SiLU (Sigmoid Linear Unit) activation, also known as the swish function.
    - SiLU is defined as f(x) = x * sigmoid(x), which has been shown to perform well in deep networks.
-3. Gating Mechanism:
+3. **Gating Mechanism**:
    - The activated gate is element-wise multiplied with the value portion.
    - This allows the network to dynamically control information flow, potentially helping with gradient flow and enabling more complex functions to be learned.
-4. Final Projection:
+4. **Final Projection**:
    - The gated output is then projected back to the model's hidden size through a final linear layer.
 
 This design combines the benefits of gating mechanisms (often seen in LSTMs and GRUs) with the simplicity and effectiveness of feedforward networks, potentially allowing for more expressive computations within each transformer layer.
@@ -297,9 +299,9 @@ print(processor.tokenizer.decode(list_tokens))
 # Output: How are you doing?<|end|>
 ```
 
-And there you have it! We've successfully ported Phi-3-Vision to MLX, loaded the model, and generated text. 
+And there we have it!
 
-While this implementation is basic, it demonstrates that our port is functional and capable of generating coherent text.
+We've successfully ported Phi-3-Vision to MLX, loaded the model, and generated text. While this implementation is basic, it demonstrates that our port is functional and capable of generating coherent text.
 
 ## 5. Limitations
 
@@ -308,7 +310,5 @@ Our minimal implementation works for short sequences, but you'll notice it start
 ## Conclusion:
 
 We've successfully created a barebones implementation of Phi-3-Vision in MLX. While it's not yet fully functional, it provides a solid foundation for the optimizations we'll explore in upcoming tutorials.
-
-## Next Steps:
 
 In Part 2, we'll implement Su-scaled Rotary Position Embeddings (RoPE) to enhance our model's ability to handle long sequences.

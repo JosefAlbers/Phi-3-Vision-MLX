@@ -293,6 +293,7 @@ for i in range(5):
     token = mx.argmax(logits[:, -1, :], axis=-1)
     list_tokens += token.tolist()
 print(processor.tokenizer.decode(list_tokens))
+# Output: How are you doing today?
 
 # Text + Image
 from PIL import Image
@@ -304,9 +305,10 @@ input_ids, pixel_values, image_sizes = [mx.array(inputs[i]) for i in ['input_ids
 logits = model(input_ids, pixel_values, image_sizes)
 token = mx.argmax(logits[:, -1, :], axis=-1)
 list_tokens = token.tolist()
-for i in range(5):
+for i in range(50):
     input_ids = mx.concatenate([input_ids, token[None]], axis=-1)
     logits = model(input_ids)
     token = mx.argmax(logits[:, -1, :], axis=-1)
     list_tokens += token.tolist()
 print(processor.tokenizer.decode(list_tokens))
+# Output: The image displays a chart with a series of connected dots forming a line that trends upwards, indicating a positive correlation between two variables. The chart is labeled with 'X' on the horizontal axis and 'Y' on the vertical axis,

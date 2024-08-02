@@ -4,6 +4,8 @@
 
 Welcome to Part 2 of our Phi-3-Vision porting series. In Part 1, we've created a basic implementation of the model in MLX. However, we also noted that it struggles with longer sequences. Today, we'll address this limitation by implementing Su-scaled Rotary Position Embeddings (RoPE), which will significantly enhance our model's ability to handle long contexts of up to 128K tokens.
 
+The full implementation of this tutorial is available at https://github.com/JosefAlbers/Phi-3-Vision-MLX/tree/main/assets/tutorial_2.py
+
 ## 1. Understanding Rotary Position Embeddings (RoPE)
 
 Before we delve into Su-scaled RoPE, let's first understand the basics of Rotary Position Embeddings.
@@ -13,7 +15,7 @@ RoPE is a technique that injects positional information into the model's token r
 1. **Frequency Calculation**: For each dimension d in the embedding space, RoPE calculates a frequency:
 
     ```python
-    inv_freq = 1 / (base ** (d / dim))
+    inv_freq = 1 / (theta ** (d / dim))
     ```
 
     <img src="https://raw.githubusercontent.com/JosefAlbers/Phi-3-Vision-MLX/main/assets/tutorial_part2_rope_inv.png">
@@ -216,7 +218,7 @@ class SuRoPE:
 
 ## 4. Integrating Su-scaled RoPE into Phi-3-Vision
 
-Integrating our Su-scaled RoPE implementation into the Phi-3-Vision model is straightforward. We only need to add two lines to our Phi3Attention module:
+Integrating our Su-scaled RoPE implementation into the Phi-3-Vision model is straightforward. We only need to add two lines to our `Phi3Attention` module:
 
 ```python
 class Phi3Attention(nn.Module):
@@ -230,10 +232,54 @@ class Phi3Attention(nn.Module):
         # ...
 ```
 
-And now our ported model can handle up to 128K tokens!
+These simple modifications allow our model to leverage Su-scaled RoPE, enabling it to handle sequences up to 128K tokens effectively.
+
+## 5. Using the Updated Phi-3-Vision Model
+
+Let's try an example that includes both text and an image:
+
+```python
+from PIL import Image
+import requests
+prompt = f"<|user|>\n<|image_1|>\nWhat is shown in this image?<|end|>\n<|assistant|>\n"
+images = [Image.open(requests.get("https://assets-c4akfrf5b4d3f4b7.z01.azurefd.net/assets/2024/04/BMDataViz_661fb89f3845e.png" , stream=True).raw)]
+inputs = processor(prompt, images, return_tensors="np")
+input_ids, pixel_values, image_sizes = [mx.array(inputs[i]) for i in ['input_ids', 'pixel_values', 'image_sizes']]
+print(input_ids.shape)
+# Output: (1, 1939)
+```
+
+Note that the input is translated into 1939 tokens.
+
+Now, let's generate a response:
+
+```python
+logits = model(input_ids, pixel_values, image_sizes)
+token = mx.argmax(logits[:, -1, :], axis=-1)
+list_tokens = token.tolist()
+for i in range(50):
+    input_ids = mx.concatenate([input_ids, token[None]], axis=-1)
+    logits = model(input_ids)
+    token = mx.argmax(logits[:, -1, :], axis=-1)
+    list_tokens += token.tolist()
+print(processor.tokenizer.decode(list_tokens))
+# Output: The image displays a chart with a series of connected dots forming a line that trends upwards, indicating a positive correlation between two variables. The chart is labeled with 'X' on the horizontal axis and 'Y' on the vertical axis,
+```
+
+This example showcases the model's ability to process a long input sequence (1939 tokens from the image plus the text prompt) and generate a coherent response, demonstrating the effectiveness of our Su-scaled RoPE implementation.
+
+## 6. Limitations
+
+While our Su-scaled RoPE implementation enhances the model's capacity for long sequences, two key limitations remain:
+
+1. **Single Input Processing**: The current implementation processes only one input at a time, limiting throughput for multiple queries.
+
+2. **Inefficient Generation**: Our token-by-token generation without caching leads to unnecessary repeated computations, slowing down the process.
+
+These issues will be addressed in upcoming tutorials, where we'll explore efficient batching and caching mechanisms to improve the model's speed and inefficiency.
 
 ## Conclusion
 
 In this tutorial, we implemented Su-scaled Rotary Position Embeddings (RoPE), enabling our model to handle sequences up to 128K tokens. 
 
-Next, we'll explore efficient batching techniques to further optimize our Phi-3-Vision implementation in MLX.
+In Part 3, we'll explore batching techniques to further optimize our Phi-3-Vision implementation in MLX.
