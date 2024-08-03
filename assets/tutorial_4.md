@@ -2,7 +2,7 @@
 
 ## Introduction
 
-In this tutorial, we'll implement caching for our Phi-3-Vision model in MLX.
+In this tutorial, we'll implement caching for our Phi-3-Vision model in MLX. Caching is a key optimization technique that can significantly improve the efficiency of language models, especially during text generation tasks. By storing and reusing intermediate computational results, we can reduce redundant calculations and speed up the overall inference process.
 
 The full implementation of this tutorial is available at https://github.com/JosefAlbers/Phi-3-Vision-MLX/tree/main/assets/tutorial_4.py
 
@@ -16,7 +16,6 @@ Without Caching:
 Iteration 1: [Prompt] -> Model -> Token 1
 Iteration 2: [Prompt, Token 1] -> Model -> Token 2
 Iteration 3: [Prompt, Token 1, Token 2] -> Model -> Token 3
-...
 ```
 
 This repetitive processing leads to unnecessary computations.
@@ -31,7 +30,6 @@ With Caching:
 Iteration 1: [Prompt] -> Model -> Token 1, Cache
 Iteration 2: Cache + [Token 1] -> Model -> Token 2, Cache
 Iteration 3: Cache + [Token 2] -> Model -> Token 3, Cache
-...
 ```
 
 Instead of processing the entire sequence each time, the model processes only the new token and uses the cached information for the rest.
@@ -130,4 +128,4 @@ In this example, we first process the initial input and obtain the cache. Then, 
 
 By implementing caching in our Phi-3-Vision model, we've significantly improved its efficiency for token generation, especially for longer sequences. This optimization is important for practical applications of large language models, enabling faster and more efficient text generation.
 
-In the next part of our series, we'll explore techniques for fine-tuning our model on custom datasets, allowing us to adapt Phi-3-Vision for specific tasks or domains. Stay tuned!
+In the upcoming tutorials, we'll explore advanced decoding strategies that allow for greater control over the model's output. These techniques will enhance the versatility of Phi-3-Vision, enabling its adaptation to a wide range of specific tasks and requirements.

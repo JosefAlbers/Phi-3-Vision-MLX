@@ -47,7 +47,7 @@ With these components identified, we're ready to begin the translation process t
 A few differences between PyTorch and MLX to note before we begin the porting:
 
 1. **Array Creation**: MLX doesn't require specifying device location.
-2. **Lazy Computation**: Arrays in MLX are only materialized when `eval()` is called.
+2. **Lazy Computation**: Arrays in MLX are only materialized when needed.
 3. **Model Definition**: MLX uses `__call__` instead of `forward` for the model's forward pass.
 
 ## 3. Understanding the Model Structure
@@ -214,7 +214,7 @@ class Phi3MLP(nn.Module):
 This implements a gated feedforward network:
 
 1. **Gated Architecture**:
-   - The input is first projected into two separate spaces: one for the 'gate' and one for the 'values'.
+   - The input is first projected into two separate spaces: one for the 'gate' and the other for the 'values'.
    - This is achieved through a single linear projection followed by a split operation.
 2. **Activation Function**:
    - The gate portion uses the SiLU (Sigmoid Linear Unit) activation, also known as the swish function.

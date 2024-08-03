@@ -2,13 +2,13 @@
 
 ## Introduction
 
-In this tutorial, we will explore how to implement batching for the Phi-3-Vision model in MLX. Batching enables the model to process multiple inputs in parallel, significantly enhancing computational efficiency and accelerating text generation.
+In this tutorial, we will explore how to implement batching for the Phi-3-Vision model in MLX. Batching enables the model to process multiple inputs simulatenously, significantly enhancing computational efficiency and accelerating text generation.
 
 The full implementation of this tutorial is available at https://github.com/JosefAlbers/Phi-3-Vision-MLX/tree/main/assets/tutorial_3.py
 
 ## 1. Understanding Batching
 
-Batching is a technique that allows the model to process multiple inputs simultaneously. This approach is particularly advantageous for smaller large language models (sLLMs) like Phi-3, as it can massively speed up the text generation process.
+Batching is a technique that allows the model to process multiple inputs in parallel. This approach is particularly advantageous for smaller large language models (sLLMs) like Phi-3, as it can massively speed up the text generation process.
 
 ## 2. Implementing Batching Utilities
 

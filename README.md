@@ -91,7 +91,7 @@ constraints=[(30, ' The correct answer is'), (10, 'X.')]
 results = constrain(prompts, constraints, blind_model=True, quantize_model=True, use_beam=True)
 ```
 
-### Multiple Choice Question Answering
+### Choosing From Options
 
 ```python
 from phi_3_vision_mlx import choose
@@ -103,7 +103,7 @@ prompts = [
 ]
 
 # For multiple-choice or decision-making tasks
-choose(prompts)
+choose(prompts, choices='ABCDE')
 ```
 
 ### LoRA Fine-tuning
@@ -304,9 +304,9 @@ benchmark()
 
 | Task                  | Vanilla Model | Quantized Model | Quantized Cache | LoRA Adapter |
 |-----------------------|---------------|-----------------|-----------------|--------------|
-| Text Generation       |  8.71 tps     |  54.59 tps      |  7.76 tps       |  8.68 tps    |
-| Image Captioning      |  7.83 tps     |  33.44 tps      |  2.86 tps       |  7.62 tps    |
-| Batched Generation    |  105.41 tps     |  185.29 tps      |  75.63 tps       |  92.08 tps    |
+| Text Generation       |  24.87 tps     |  58.61 tps      |  18.47 tps       |  24.74 tps    |
+| Image Captioning      |  19.08 tps     |  37.43 tps      |  3.58 tps       |  18.88 tps    |
+| Batched Generation    |  235.79 tps     |  147.94 tps      |  122.02 tps       |  233.09 tps    |
 
 *(On M1 Max 64GB)*
 
@@ -333,6 +333,10 @@ with open(Path(filename).with_suffix('.json'), 'w') as f:
 API references and additional information are available at:
 
 https://josefalbers.github.io/Phi-3-Vision-MLX/
+
+Also check out our tutorial series available at:
+
+https://medium.com/@albersj66
 
 ## License
 

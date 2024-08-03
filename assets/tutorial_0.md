@@ -44,9 +44,9 @@ These resources provide a great foundation for anyone looking to explore MLX and
 
 We'll start by comparing the original Hugging Face implementation with our MLX port, highlighting key differences in syntax and how MLX leverages Apple Silicon's unified memory architecture.
 
-### 2. Implementing Su-RoPE for 128K Context
+### 2. Implementing SuRoPE for 128K Context
 
-We'll explore the Surrogate Rotary Position Embedding (Su-RoPE) implementation that enables Phi-3-Vision to handle impressive 128K token contexts.
+We'll explore the Surrogate Rotary Position Embedding (SuRoPE) implementation that enables Phi-3-Vision to handle impressive 128K token contexts.
 
 ### 3. Optimizing Text Generation in MLX: From Batching to Advanced Techniques
 

@@ -8,7 +8,7 @@ The full implementation of this tutorial is available at https://github.com/Jose
 
 ## 1. Understanding Rotary Position Embeddings (RoPE)
 
-Before we delve into Su-scaled RoPE, let's first understand the basics of Rotary Position Embeddings.
+Before we delve into Su-scaled RoPE, let's first understand the basics of Rotary Position Embeddings (RoPE).
 
 RoPE is a technique that injects positional information into the model's token representations without adding extra tokens or increasing the model's parameter count. The key idea is to apply a rotation to each token's embedding based on its position in the sequence.
 
@@ -109,9 +109,9 @@ RoPE is a technique that injects positional information into the model's token r
 
 Now that we understand RoPE, let's explore how Su-scaled RoPE builds upon and enhances this concept.
 
-## 2. Understanding Su-RoPE
+## 2. Understanding SuRoPE
 
-Su-RoPE extends RoPE by introducing scaling factors for different sequence length ranges. 
+SuRoPE extends RoPE by introducing scaling factors for different sequence length ranges. 
 
 ```python
 freq = 1 / (SU_FACTOR * theta ** (d / dim))
@@ -249,9 +249,7 @@ print(input_ids.shape)
 # Output: (1, 1939)
 ```
 
-Note that the input is translated into 1939 tokens.
-
-Now, let's generate a response:
+Note that the input is translated into 1939 tokens. Let's generate a response:
 
 ```python
 logits = model(input_ids, pixel_values, image_sizes)
@@ -280,6 +278,6 @@ These issues will be addressed in upcoming tutorials, where we'll explore effici
 
 ## Conclusion
 
-In this tutorial, we implemented Su-scaled Rotary Position Embeddings (RoPE), enabling our model to handle sequences up to 128K tokens. 
+In this tutorial, we implemented Su-scaled Rotary Position Embeddings (SuRoPE), enabling our model to handle sequences up to 128K tokens. 
 
 In Part 3, we'll explore batching techniques to further optimize our Phi-3-Vision implementation in MLX.
