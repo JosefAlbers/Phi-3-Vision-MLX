@@ -2,7 +2,7 @@
 
 ## Introduction:
 
-Welcome to an exciting series on optimizing cutting-edge AI models for Apple Silicon! Over the next few weeks, we'll dive deep into the process of porting Phi-3-Vision, a powerful and compact vision-language model, from Hugging Face to MLX.
+Welcome to a series on optimizing cutting-edge AI models for Apple Silicon! Over the next few weeks, we'll dive deep into the process of porting Phi-3-Vision, a powerful and compact vision-language model, from Hugging Face to MLX.
 
 This series is designed for AI enthusiasts, developers, and researchers interested in running advanced models efficiently on Mac devices. For those eager to get started, you can find the MLX ports of both Phi-3-Mini-128K and Phi-3-Vision in my GitHub repository: https://github.com/JosefAlbers/Phi-3-Vision-MLX
 
@@ -50,11 +50,11 @@ We'll explore the Surrogate Rotary Position Embedding (SuRoPE) implementation th
 
 ### 3. Optimizing Text Generation in MLX: From Batching to Advanced Techniques
 
-Learn how to implement efficient batch text generation, a crucial feature for many real-world applications. We'll also cover custom KV-Cache implementation, streaming capabilities, and other text generation optimizations.
+Learn how to implement efficient batch text generation, an essential feature for many real-world applications. We'll also cover custom KV-Cache implementation and other text generation optimizations.
 
 ### 4. LoRA Fine-tuning and Evaluation on MLX
 
-Discover how to perform Low-Rank Adaptation (LoRA) training, enabling efficient fine-tuning of Phi-3-Vision on custom datasets. We'll also develop comprehensive evaluation techniques to ensure our LoRA-adapted model meets or exceeds the original's performance.
+Discover how to perform Low-Rank Adaptation (LoRA) training, enabling efficient fine-tuning of Phi-3-Vision on custom datasets.
 
 ### 5. Building a Versatile AI Agent
 

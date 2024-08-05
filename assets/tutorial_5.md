@@ -1,8 +1,8 @@
-# Part 5: Implementing Choice Selection with Phi-3-Vision
+# Part 5: Implementing Choice Selection
 
 ## Introduction
 
-In this tutorial, we'll explore how to implement a choice selection function for our Phi-3-Vision model. This function constrains the model to pick from a small set of predefined options, making it useful for multiple-choice scenarios.
+In this tutorial, we'll be crafting a choice selection function for Phi-3-Vision. This function constrains the model to pick from a small set of predefined options, making it useful for multiple-choice scenarios.
 
 The full implementation of this tutorial is available at https://github.com/JosefAlbers/Phi-3-Vision-MLX/tree/main/assets/tutorial_5.py
 

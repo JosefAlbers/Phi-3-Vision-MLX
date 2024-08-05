@@ -120,6 +120,6 @@ print(processor.tokenizer.batch_decode(list_tokens))
 
 ## Conclusion
 
-By implementing custom batching for Phi-3-Vision, we've enabled our model to efficiently handle multiple inputs while ensuring correct behavior for autoregressive generation. This approach provides fine-grained control over input processing, position IDs, and attention masks, which is crucial for optimal model performance.
+By implementing custom batching for Phi-3-Vision, we've enabled our model to efficiently handle multiple inputs while ensuring correct behavior for autoregressive generation. This approach provides fine-grained control over input processing, position IDs, and attention masks, which is essential for optimal model performance.
 
 In the next part, we'll explore implementing efficient caching mechanisms to further accelerate text generation, especially for longer sequences.

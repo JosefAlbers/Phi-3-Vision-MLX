@@ -85,7 +85,7 @@ prompts = [
 ]
 
 # Define constraints for the generated text
-constraints=[(30, ' The correct answer is'), (10, 'X.')]
+constraints = [(0, ' The'), (100, ' The correct answer is'), (1, 'X.')]
 
 # Apply constrained beam decoding
 results = constrain(prompts, constraints, blind_model=True, quantize_model=True, use_beam=True)
@@ -151,7 +151,7 @@ test_lora(adapter_path="/path/to/your/lora")  # With specific adapter
      -d '{
        "prompt": [
            "Hello, world!",
-           "Guten tag!"
+           "Guten Tag!"
        ],
        "max_tokens": 50
      }'

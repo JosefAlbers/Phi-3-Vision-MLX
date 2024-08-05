@@ -525,6 +525,7 @@ class KVCache:
             kv = mx.repeat(self.kv[:,:,:,:self.offset,:], repeats=n_beam, axis=1)
             return mx.concatenate([kv[0], keys], axis=-2), mx.concatenate([kv[1], values], axis=-2)
         if self.use_quantized_cache:
+            self.offset += values.shape[2]
             _, B, N, _, D = self.shape
             if self.kv is None:
                 self.kv = (mx.quantize(keys.reshape((B*N,-1)), group_size=32), mx.quantize(values.reshape((B*N,-1)), group_size=32))
@@ -582,7 +583,6 @@ class Phi3F(nn.Module):
         past_L, new_L = cache[0].offset, x.shape[1]
         mask = self.masker(past_L, new_L)
         cos, sin = self.roper(past_L, new_L)
-        mx.eval(mask, cos, sin)
         for i, l in enumerate(self.layers):
             x = l(x, cache[i], cos, sin, mask, n_beam)
         if advance_offset is not None:

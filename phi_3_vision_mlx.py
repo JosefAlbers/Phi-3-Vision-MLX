@@ -498,6 +498,8 @@ def _already(array_2d, array_1d):
     return ~mx.all(array_2d[:, -len(array_1d):] == array_1d, axis=1)
 
 def _constrain(model, processor, prompt, constraints, return_full_text=False, mute=False, use_beam=False, verbose=True):
+    def log_mean(x):
+        return x.sum(axis=-1) / x.shape[-1]
     def _get_beam(logits, cache, id_constraint, beam_idx=0, n_beam=3):
         token = mx.argmax(logits[:, beam_idx, :], axis=-1)
         _arg_beam = mx.argpartition(-logits[:, beam_idx, :], kth=n_beam, axis=-1)[:,:n_beam]
@@ -537,11 +539,11 @@ def _constrain(model, processor, prompt, constraints, return_full_text=False, mu
         logits_rest = nn.log_softmax(logits_rest, axis=-1)
         _score_1 = logits_rest[mx.arange(tiled_id_constraint.shape[0])[:,None], mx.arange(tiled_id_constraint.shape[1]-1)[None,:], tiled_id_constraint[:,1:]]
         running_score = mx.max(logits[:, -1, :], axis=-1)[:,None]
-        pre_beam_score = mx.concatenate([_score_0[:,None], _score_1], axis=1).mean(axis=1)
+        pre_beam_score = log_mean(mx.concatenate([_score_0[:,None], _score_1], axis=1))
         pre_beam_synth = mx.concatenate([tiled_id_constraint, synth_pad], axis=1)
-        if use_beam:
+        if use_beam and constraint[0] > 0:
             token, beam_token, beam_score = _get_beam(logits, cache, id_constraint, -1)
-            post_beam_score = mx.concatenate([running_score, beam_score], axis=1).mean(axis=1)
+            post_beam_score = log_mean(beam_score)
             post_beam_synth = mx.concatenate([beam_token[:,None], tiled_id_constraint], axis=1)
             win = pre_beam_score > post_beam_score
             score_sofar = mx.where(win, pre_beam_score, post_beam_score)
@@ -561,11 +563,11 @@ def _constrain(model, processor, prompt, constraints, return_full_text=False, mu
             logits, cache = model(input_ids=token_plus, cache=cache, advance_offset=1)
             logits = nn.log_softmax(logits)
             mx.eval(logits)
-            pre_beam_score = mx.concatenate([running_score, logits[mx.arange(logits.shape[0])[:,None], mx.arange(logits.shape[1]-1)[None,:], token_plus[:,1:]]], axis=1).mean(axis=1)
+            pre_beam_score = log_mean(mx.concatenate([running_score, logits[mx.arange(logits.shape[0])[:,None], mx.arange(logits.shape[1]-1)[None,:], token_plus[:,1:]]], axis=1))
             pre_beam_synth = mx.concatenate(tokens + [tiled_id_constraint, synth_pad], axis=1)
             if use_beam:
                 token, beam_token, beam_score = _get_beam(logits, cache, id_constraint)
-                post_beam_score =  mx.concatenate([running_score, beam_score], axis=1).mean(axis=1)
+                post_beam_score = log_mean(mx.concatenate([running_score, beam_score], axis=1))
                 post_beam_synth = mx.concatenate(tokens + [beam_token[:,None], tiled_id_constraint], axis=1)
                 win = pre_beam_score > post_beam_score
                 score = mx.where(win, pre_beam_score, post_beam_score)
@@ -576,16 +578,17 @@ def _constrain(model, processor, prompt, constraints, return_full_text=False, mu
                 synth = pre_beam_synth
             synth_sofar = mx.concatenate([synth_sofar, synth_pad], axis=1)
             finished_rows *= _already(mx.concatenate(tokens, axis=1), id_constraint)
-            if finished_rows.sum() < 1:
-                break
             rows_to_update = score > score_sofar
             rows_to_update *= finished_rows
             synth_sofar = mx.where(rows_to_update[:,None], synth, synth_sofar)
             score_sofar = mx.where(rows_to_update, score, score_sofar)
             running_score = mx.concatenate([running_score, logits[mx.arange(token.shape[0]),0,token][:,None]], axis=1)
             finished_rows *= token != ID_EOS
+            if finished_rows.sum() < 1:
+                break
             token = token[:,None]
             mx.eval(token)
+
         constrain_time += tic()
         output = mx.concatenate([dict_input['input_ids'], synth_sofar], axis=1).tolist()
         S = dict_input['input_ids'].shape[1]
@@ -1136,7 +1139,7 @@ def test_lora(model_path=PATH_QUANTIZED_PHI3_BLIND, adapter_path=True, dataset_p
             'q_col':'input',
             'q_until':None,
             'q_format':'',
-            'fxn':partial(_constrain, model=model, processor=processor, constraints=[(100, ' The correct answer is'), (1, 'X.')], verbose=False, mute=True, use_beam=False),
+            'fxn':partial(_constrain, model=model, processor=processor, constraints=[(0, '\nThe'), (100, ' The correct answer is'), (1, 'X.')], verbose=False, mute=True, use_beam=False),
             'a_format':'The correct answer is ',
             'a_col':'constrained_attempt',
             'c_col':'output',
@@ -1146,7 +1149,7 @@ def test_lora(model_path=PATH_QUANTIZED_PHI3_BLIND, adapter_path=True, dataset_p
             'q_col':'input',
             'q_until':None,
             'q_format':'',
-            'fxn':partial(_constrain, model=model, processor=processor, constraints=[(100, ' The correct answer is'), (1, 'X.')], verbose=False, mute=True, use_beam=True),
+            'fxn':partial(_constrain, model=model, processor=processor, constraints=[(0, '\nThe'), (100, ' The correct answer is'), (1, 'X.')], verbose=False, mute=True, use_beam=True),
             'a_format':'The correct answer is ',
             'a_col':'beamed_attempt',
             'c_col':'output',
@@ -1410,7 +1413,7 @@ def choose(prompt, choices='ABCDE', images=None, preload=None, blind_model=False
         prompt, _ = _apply_chat_template(prompt, images, verbose)
     return _choose_from(*preload, prompt=prompt, choices=choices)
 
-def constrain(prompt, constraints=[(30, ' The correct answer is'), (1, 'X.')], images=None, preload=None, blind_model=False, quantize_model=False, quantize_cache=False, use_adapter=False, verbose=True, apply_chat_template=True, use_beam=False):
+def constrain(prompt, constraints=[(0, '\nThe'), (100, ' The correct answer is'), (1, 'X.')], images=None, preload=None, blind_model=False, quantize_model=False, quantize_cache=False, use_adapter=False, verbose=True, apply_chat_template=True, use_beam=False):
     """
     Perform constrained decoding on the given prompt using specified constraints.
 

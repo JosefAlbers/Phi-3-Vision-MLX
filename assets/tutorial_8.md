@@ -30,7 +30,7 @@ The class is designed with a default toolchain and an initializer that sets up t
 
 ## Toolchain Parsing
 
-The `set_toolchain` method is crucial for understanding how toolchains are processed:
+The `set_toolchain` method plays a key role in parsing and preparing toolchains for execution:
 
 ```python
 def set_toolchain(self, s):
