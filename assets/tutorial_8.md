@@ -1,4 +1,4 @@
-# Part 8: Implementing the Agent Class and Toolchain System
+# Part 8: Implementing the Agent and Toolchain System
 
 ## Introduction
 
@@ -23,7 +23,7 @@ class Agent:
         self.reset()
 
     def __call__(self, prompt:str, images=None):
-        # Implementation details
+        # ...
 ```
 
 The class is designed with a default toolchain and an initializer that sets up the agent's configuration.

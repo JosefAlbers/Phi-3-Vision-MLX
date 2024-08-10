@@ -3,65 +3,35 @@ from pathlib import Path
 
 from huggingface_hub import InferenceClient
 
-# def mistral_api(prompt, history):
-#     """
-#     Example:
-#     --------
-#     agent = Agent(toolchain = "responses, history = mistral_api(prompt, history)")
-#     agent('Write a neurology ICU admission note')
-#     """
-#     history = '<s>' if history is None else history
-#     history += f"[INST] {prompt} [/INST]"
-#     client = InferenceClient("mistralai/Mistral-7B-Instruct-v0.3", token = os.environ.get('HF_READ_TOKEN', False))
-#     generate_kwargs = dict(
-#         temperature=0.9,
-#         max_new_tokens=1024,
-#         top_p=0.95,
-#         repetition_penalty=1.0,
-#         do_sample=True,
-#         seed=42,
-#         stream=False,
-#         details=False,
-#         # details=True,
-#         return_full_text=False,
-#     )
-#     result = client.text_generation(history, **generate_kwargs)
-#     result = result.strip()
-#     # result = result.generated_text.strip() # if details=True
-#     history += f" {result}</s> "
-#     print(f'### Prompt ###\n{prompt}\n### Output ###\n{result}')
-#     return {'responses':result, 'history':history}
-
-def mistral_api(prompt, history, verbose=True, api_model="mistralai/Mistral-Nemo-Instruct-2407"):
+def mistral_api(prompt, history, verbose=True, return_dict=True, api_model="mistralai/Mistral-Nemo-Instruct-2407"):
     """
     Example:
     --------
     agent = Agent(toolchain = "responses, history = mistral_api(prompt, history)")
     agent('Write a neurology ICU admission note')
     """
-    # "mistralai/Mistral-Nemo-Instruct-2407" "mistralai/Mistral-7B-Instruct-v0.3"
     history = '<s>' if history is None else history
     history += f"[INST] {prompt} [/INST]"
     client = InferenceClient(api_model, token = os.environ.get('HF_READ_TOKEN', False))
     generate_kwargs = dict(
         temperature=0.9,
-        max_new_tokens=1024,
+        max_new_tokens=8192,
         top_p=0.95,
         repetition_penalty=1.0,
         do_sample=True,
         seed=42,
         stream=False,
         details=False,
-        # details=True,
         return_full_text=False,
     )
     result = client.text_generation(history, **generate_kwargs)
     result = result.strip()
-    # result = result.generated_text.strip() # if details=True
     history += f" {result}</s> "
     if verbose:
         print(f'### Prompt ###\n{prompt}\n### Output ###\n{result}')
-    return {'responses':result, 'history':history}
+    if return_dict:
+        return {'responses':result, 'history':history}
+    return result
 
 def bark_api(prompt):
     """

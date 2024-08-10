@@ -27,7 +27,7 @@ from mlx.utils import tree_flatten, tree_unflatten
 from PIL import Image
 
 from api import bark_api, mistral_api
-from gte import VDB
+from gte import VDB, GteModel
 from phi import (LoRALinear, Phi3ForCausalLM, Phi3FProcessor, Phi3VForCausalLM,
                  Phi3VProcessor, Tic, TrainingCallback)
 
@@ -497,8 +497,10 @@ def _already(array_2d, array_1d):
         return mx.ones(array_2d.shape[0])
     return ~mx.all(array_2d[:, -len(array_1d):] == array_1d, axis=1)
 
-def _constrain(model, processor, prompt, constraints, return_full_text=False, mute=False, use_beam=False, verbose=True):
-    def log_mean(x):
+def _constrain(model, processor, prompt, constraints, return_full_text=False, mute=False, use_beam=False, verbose=True, log_norm=False):
+    def _log_mean(x):
+        if log_norm:
+            return x.sum(axis=-1) / mx.log(x.shape[-1])
         return x.sum(axis=-1) / x.shape[-1]
     def _get_beam(logits, cache, id_constraint, beam_idx=0, n_beam=3):
         token = mx.argmax(logits[:, beam_idx, :], axis=-1)
@@ -539,11 +541,11 @@ def _constrain(model, processor, prompt, constraints, return_full_text=False, mu
         logits_rest = nn.log_softmax(logits_rest, axis=-1)
         _score_1 = logits_rest[mx.arange(tiled_id_constraint.shape[0])[:,None], mx.arange(tiled_id_constraint.shape[1]-1)[None,:], tiled_id_constraint[:,1:]]
         running_score = mx.max(logits[:, -1, :], axis=-1)[:,None]
-        pre_beam_score = log_mean(mx.concatenate([_score_0[:,None], _score_1], axis=1))
+        pre_beam_score = _log_mean(mx.concatenate([_score_0[:,None], _score_1], axis=1))
         pre_beam_synth = mx.concatenate([tiled_id_constraint, synth_pad], axis=1)
         if use_beam and constraint[0] > 0:
             token, beam_token, beam_score = _get_beam(logits, cache, id_constraint, -1)
-            post_beam_score = log_mean(beam_score)
+            post_beam_score = _log_mean(beam_score)
             post_beam_synth = mx.concatenate([beam_token[:,None], tiled_id_constraint], axis=1)
             win = pre_beam_score > post_beam_score
             score_sofar = mx.where(win, pre_beam_score, post_beam_score)
@@ -563,11 +565,11 @@ def _constrain(model, processor, prompt, constraints, return_full_text=False, mu
             logits, cache = model(input_ids=token_plus, cache=cache, advance_offset=1)
             logits = nn.log_softmax(logits)
             mx.eval(logits)
-            pre_beam_score = log_mean(mx.concatenate([running_score, logits[mx.arange(logits.shape[0])[:,None], mx.arange(logits.shape[1]-1)[None,:], token_plus[:,1:]]], axis=1))
+            pre_beam_score = _log_mean(mx.concatenate([running_score, logits[mx.arange(logits.shape[0])[:,None], mx.arange(logits.shape[1]-1)[None,:], token_plus[:,1:]]], axis=1))
             pre_beam_synth = mx.concatenate(tokens + [tiled_id_constraint, synth_pad], axis=1)
             if use_beam:
                 token, beam_token, beam_score = _get_beam(logits, cache, id_constraint)
-                post_beam_score = log_mean(mx.concatenate([running_score, beam_score], axis=1))
+                post_beam_score = _log_mean(mx.concatenate([running_score, beam_score], axis=1))
                 post_beam_synth = mx.concatenate(tokens + [beam_token[:,None], tiled_id_constraint], axis=1)
                 win = pre_beam_score > post_beam_score
                 score = mx.where(win, pre_beam_score, post_beam_score)

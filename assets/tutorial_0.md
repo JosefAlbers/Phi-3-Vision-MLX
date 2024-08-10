@@ -46,7 +46,7 @@ We'll start by comparing the original Hugging Face implementation with our MLX p
 
 ### 2. Implementing SuRoPE for 128K Context
 
-We'll explore the Surrogate Rotary Position Embedding (SuRoPE) implementation that enables Phi-3-Vision to handle impressive 128K token contexts.
+We'll explore the Su-scaled Rotary Position Embedding (SuRoPE) implementation that enables Phi-3-Vision to handle impressive 128K token contexts.
 
 ### 3. Optimizing Text Generation in MLX: From Batching to Advanced Techniques
 

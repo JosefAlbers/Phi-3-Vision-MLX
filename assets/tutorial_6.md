@@ -103,7 +103,7 @@ It's especially useful in the context of AI agents and function calling. Constra
 
 In multi-agent systems, constrained decoding maintains consistent interfaces between components, allowing outputs from one model to serve reliably as inputs for another. This consistency is key for building robust, multi-step AI workflows and seamlessly integrating AI-generated code into larger systems.
 
-## 2. Guided Reasoning in Complex Decision-Making
+### 2. Guided Reasoning in Complex Decision-Making
 
 Constrained decoding can also guide the model's reasoning process in complex scenarios like medical diagnosis. Let's look at an example:
 

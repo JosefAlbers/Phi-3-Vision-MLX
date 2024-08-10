@@ -19,7 +19,6 @@ Phi-3-MLX is a versatile AI framework that leverages both the Phi-3-Vision multi
 Phi-3-MLX is designed to run on Apple Silicon Macs. The minimum requirements are:
 
 - Apple Silicon Mac (M1, M2, or later)
-- macOS 11.0 or later
 - 8GB RAM (with quantization using `quantize_model=True` option)
 
 For optimal performance, especially when working with larger models or datasets, we recommend using a Mac with 16GB RAM or more.
@@ -85,7 +84,7 @@ prompts = [
 ]
 
 # Define constraints for the generated text
-constraints = [(0, ' The'), (100, ' The correct answer is'), (1, 'X.')]
+constraints = [(0, '\nThe'), (100, ' The correct answer is'), (1, 'X.')]
 
 # Apply constrained beam decoding
 results = constrain(prompts, constraints, blind_model=True, quantize_model=True, use_beam=True)
@@ -127,49 +126,13 @@ generate("Describe the potential applications of CRISPR gene editing in medicine
     quantize_model=True,
     use_adapter=True)
 
-# Compare LoRA adapters
-test_lora(adapter_path=None)                  # Without LoRA adapter
-test_lora(adapter_path=True)                  # With default LoRA adapter
-test_lora(adapter_path="/path/to/your/lora")  # With specific adapter
+# Test the performance of the trained LoRA adapter
+test_lora()
 ```
 
 ![Alt text](https://raw.githubusercontent.com/JosefAlbers/Phi-3-Vision-MLX/main/assets/train_log.png)
 
-## 2. HTTP Model Server
-
-1. Start the server:
-
-   ```
-   python server.py
-   ```
-
-2. Send POST requests to `http://localhost:8000/v1/completions` with a JSON body:
-
-   ```bash
-   curl -X POST http://localhost:8000/v1/completions \
-     -H "Content-Type: application/json" \
-     -d '{
-       "prompt": [
-           "Hello, world!",
-           "Guten Tag!"
-       ],
-       "max_tokens": 50
-     }'
-   ```
-
-3. Receive JSON responses with generated text for each prompt:
-
-   ```json
-    {
-      "model": "phi-3-vision", 
-      "responses": [
-        "Hello! How can I help you today?<|end|>", 
-        "Guten Tag! Wie kann ich Ihnen helfen?<|end|>"
-      ]
-    }
-   ```
-
-## 3. Agent Interactions
+## 2. Agent Interactions
 
 ### Multi-turn Conversation
 
@@ -218,7 +181,7 @@ agent.end()
 
 ![Alt text](https://raw.githubusercontent.com/JosefAlbers/Phi-3-Vision-MLX/main/assets/api_agent.png)
 
-## 4. Custom Toolchains
+## 3. Custom Toolchains
 
 ### In-Context Learning Agent
 
@@ -309,24 +272,6 @@ benchmark()
 | Batched Generation    |  235.79 tps     |  147.94 tps      |  122.02 tps       |  233.09 tps    |
 
 *(On M1 Max 64GB)*
-
-## More Examples
-
-For advanced examples and external library integration, see `examples.py` in the project root. Preview:
-
-```python
-# Multimodal Reddit Thread Summarizer
-from rd2md import rd2md
-from pathlib import Path
-import json
-
-filename, contents, images = rd2md()
-prompt = 'Write an executive summary of above (max 200 words). The article should capture the diverse range of opinions and key points discussed in the thread, presenting a balanced view of the topic without quoting specific users or comments directly. Focus on organizing the information cohesively, highlighting major arguments, counterarguments, and any emerging consensus or unresolved issues within the community.'
-prompts = [f'{s}\n\n{prompt}' for s in contents]
-results = [generate(prompts[i], images[i], max_tokens=512, blind_model=False, quantize_model=True, quantize_cache=False, verbose=False) for i in range(len(prompts))]
-with open(Path(filename).with_suffix('.json'), 'w') as f:
-    json.dump({'prompts':prompts, 'images':images, 'results':results}, f, indent=4)
-```
 
 ## Documentation
 
