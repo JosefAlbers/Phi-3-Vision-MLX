@@ -246,8 +246,8 @@ def _linear_to_lora_layers(model, lora_targets, lora_layers, lora_config):
 
 def _setup():
     paths = [
-        ("microsoft/Phi-3-mini-128k-instruct", PATH_ORIGINAL_PHI3_BLIND, PATH_QUANTIZED_PHI3_BLIND),
-        ("microsoft/Phi-3-vision-128k-instruct", PATH_ORIGINAL_PHI3_VISION, PATH_QUANTIZED_PHI3_VISION)
+        ("microsoft/Phi-3.5-mini-instruct", PATH_ORIGINAL_PHI3_BLIND, PATH_QUANTIZED_PHI3_BLIND),
+        ("microsoft/Phi-3.5-vision-instruct", PATH_ORIGINAL_PHI3_VISION, PATH_QUANTIZED_PHI3_VISION)
     ]
     for hub, local, quant in paths:
         raw = snapshot_download(repo_id=hub, allow_patterns=["*.safetensors", "*.json"])
@@ -1221,7 +1221,7 @@ def benchmark(blind_model=False, json_path='benchmark.json'):
     """
     prompts = [
         ('Write a mystery horror.', ),
-        ('What is shown in this image?', 'https://assets-c4akfrf5b4d3f4b7.z01.azurefd.net/assets/2024/04/BMDataViz_661fb89f3845e.png'),
+        ('What is shown in this image?', 'https://collectionapi.metmuseum.org/api/collection/v1/iiif/344291/725918/main-image'),
         ([
             "Write an executive summary for a communications business plan",
             "Explain quantum computing.",
