@@ -10,8 +10,8 @@ Phi-3-MLX is a versatile AI framework that leverages both the Phi-3-Vision multi
 Features
 --------
 
-- Support for the newly updated Phi-3-Mini-128K (language-only) model
-- Integration with Phi-3-Vision (multimodal) model
+- Support for the Phi-3.5-Mini (language-only) model
+- Integration with Phi-3.5-Vision (multimodal) model
 - Optimized performance on Apple Silicon using MLX
 - Batched generation for processing multiple prompts
 - Flexible agent system for various AI tasks

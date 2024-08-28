@@ -301,6 +301,8 @@ the model and processor based on the provided configuration. Default is None.</p
 </dd>
 <dt>use_adapter<span class="classifier">bool, optional</span></dt><dd><p>If True, uses a LoRA adapter with the model for fine-tuned behavior. Default is False.</p>
 </dd>
+<dt>verbose<span class="classifier">bool, optional</span></dt><dd><p>If True, print additional information during execution. Default is True.</p>
+</dd>
 <dt>apply_chat_template<span class="classifier">bool, optional</span></dt><dd><p>If True, applies a chat template to the prompt before processing. Default is True.</p>
 </dd>
 </dl>
@@ -329,18 +331,23 @@ the input prompt was a string, otherwise returns a list of strings.</p>
 <h2>constrain<a class="headerlink" href="#constrain" title="Link to this heading">¶</a></h2>
 <dl class="py function">
 <dt class="sig sig-object py" id="phi_3_vision_mlx.constrain">
-<span class="sig-prename descclassname"><span class="pre">phi_3_vision_mlx.</span></span><span class="sig-name descname"><span class="pre">constrain</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">prompt</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">constraints</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">[(30,</span> <span class="pre">'</span> <span class="pre">The</span> <span class="pre">correct</span> <span class="pre">answer</span> <span class="pre">is'),</span> <span class="pre">(1,</span> <span class="pre">'X.')]</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">images</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">preload</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">blind_model</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">False</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">quantize_model</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">False</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">quantize_cache</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">False</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">use_adapter</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">False</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">verbose</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">True</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">apply_chat_template</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">True</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">use_beam</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">False</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#phi_3_vision_mlx.constrain" title="Link to this definition">¶</a></dt>
+<span class="sig-prename descclassname"><span class="pre">phi_3_vision_mlx.</span></span><span class="sig-name descname"><span class="pre">constrain</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">prompt</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">constraints</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">[(0,</span> <span class="pre">'\nThe'),</span> <span class="pre">(100,</span> <span class="pre">'</span> <span class="pre">The</span> <span class="pre">correct</span> <span class="pre">answer</span> <span class="pre">is'),</span> <span class="pre">'ABCDE']</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">images</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">preload</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">blind_model</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">False</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">quantize_model</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">False</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">quantize_cache</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">False</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">use_adapter</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">False</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">verbose</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">True</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">apply_chat_template</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">True</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">use_beam</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">False</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#phi_3_vision_mlx.constrain" title="Link to this definition">¶</a></dt>
 <dd><p>Perform constrained decoding on the given prompt using specified constraints.</p>
 <p>This function generates text based on the input prompt while adhering to the specified constraints.
 It supports various model configurations and can handle both text and image inputs.</p>
 <section id="id12">
 <h3>Parameters:<a class="headerlink" href="#id12" title="Link to this heading">¶</a></h3>
-<dl class="simple">
+<dl>
 <dt>prompt<span class="classifier">str or list of str</span></dt><dd><p>The input prompt(s) for text generation.</p>
 </dd>
-<dt>constraints<span class="classifier">list of tuple, optional</span></dt><dd><p>List of constraints in the format [(max_tokens, constraint_text), …].
-Each constraint specifies the maximum number of tokens to generate before the constraint_text
-must appear. Default is [(30, ‘ The correct answer is’), (10, ‘X.’)].</p>
+<dt>constraints<span class="classifier">list, optional</span></dt><dd><p>List of constraints. Each constraint can be:
+- A tuple (max_tokens, constraint_text): Specifies the maximum number of tokens to generate</p>
+<blockquote>
+<div><p>before the constraint_text must appear.</p>
+</div></blockquote>
+<ul class="simple">
+<li><p>A string: Triggers the use of _choose_from() to select from the given options.</p></li>
+</ul>
 </dd>
 <dt>images<span class="classifier">list or None, optional</span></dt><dd><p>List of image inputs for multimodal models. Default is None.</p>
 </dd>
@@ -354,6 +361,8 @@ the model and processor based on the provided configuration. Default is None.</p
 <dt>quantize_cache<span class="classifier">bool, optional</span></dt><dd><p>If True, uses cache quantization for improved memory efficiency. Default is False.</p>
 </dd>
 <dt>use_adapter<span class="classifier">bool, optional</span></dt><dd><p>If True, uses a LoRA adapter with the model for fine-tuned behavior. Default is False.</p>
+</dd>
+<dt>verbose<span class="classifier">bool, optional</span></dt><dd><p>If True, print additional information during execution. Default is True.</p>
 </dd>
 <dt>apply_chat_template<span class="classifier">bool, optional</span></dt><dd><p>If True, applies a chat template to the prompt before processing. Default is True.</p>
 </dd>
@@ -374,16 +383,18 @@ the input prompt was a string, otherwise returns a list of strings.</p>
 <ul class="simple">
 <li><p>The function preprocesses the prompt and applies the constraints sequentially.</p></li>
 <li><p>It uses either a custom constrained generation algorithm or beam search to ensure the output adheres to the constraints.</p></li>
+<li><p>When a constraint is a string, it uses _choose_from() to select from the given options.</p></li>
 <li><p>The output format matches the input format (str or list of str).</p></li>
 <li><p>If apply_chat_template is True, the prompt is processed through a chat template before generation.</p></li>
 </ul>
 </section>
 <section id="id15">
 <h3>Example:<a class="headerlink" href="#id15" title="Link to this heading">¶</a></h3>
-<div class="doctest highlight-default notranslate"><div class="highlight"><pre><span></span><span class="gp">&gt;&gt;&gt; </span><span class="n">prompt</span> <span class="o">=</span> <span class="s2">&quot;Write a Python function to calculate the Fibonacci sequence up to a given number n.&quot;</span>
+<div class="doctest highlight-default notranslate"><div class="highlight"><pre><span></span><span class="gp">&gt;&gt;&gt; </span><span class="n">prompt</span> <span class="o">=</span> <span class="s2">&quot;What is the capital of France?&quot;</span>
 <span class="gp">&gt;&gt;&gt; </span><span class="n">constraints</span> <span class="o">=</span> <span class="o">...</span>
 <span class="gp">&gt;&gt;&gt; </span><span class="n">result</span> <span class="o">=</span> <span class="n">constrain</span><span class="p">(</span><span class="n">prompt</span><span class="p">,</span> <span class="n">constraints</span><span class="p">)</span>
 <span class="gp">&gt;&gt;&gt; </span><span class="nb">print</span><span class="p">(</span><span class="n">result</span><span class="p">)</span>
+<span class="go">&#39;The capital of France is Paris. The correct answer is C&#39;</span>
 </pre></div>
 </div>
 </section>

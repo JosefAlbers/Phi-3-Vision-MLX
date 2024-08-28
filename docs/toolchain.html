@@ -55,6 +55,7 @@
 <li class="toctree-l2"><a class="reference internal" href="#example-1-in-context-learning-agent">Example 1: In-Context Learning Agent</a></li>
 <li class="toctree-l2"><a class="reference internal" href="#example-2-retrieval-augmented-coding-agent">Example 2: Retrieval Augmented Coding Agent</a></li>
 <li class="toctree-l2"><a class="reference internal" href="#example-3-multi-agent-interaction">Example 3: Multi-Agent Interaction</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#example-4-external-llm-integration">Example 4. External LLM Integration</a></li>
 </ul>
 </li>
 <li class="toctree-l1"><a class="reference internal" href="benchmark.html">Benchmark</a></li>
@@ -154,6 +155,24 @@
 <div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="c1"># Continued from Example 2 above</span>
 <span class="n">agent_writer</span> <span class="o">=</span> <span class="n">Agent</span><span class="p">(</span><span class="n">early_stop</span><span class="o">=</span><span class="mi">100</span><span class="p">)</span>
 <span class="n">agent_writer</span><span class="p">(</span><span class="sa">f</span><span class="s1">&#39;Write a stock analysis report on: </span><span class="si">{</span><span class="n">user_input</span><span class="si">}</span><span class="s1">&#39;</span><span class="p">,</span> <span class="n">images</span><span class="p">)</span>
+</pre></div>
+</div>
+</section>
+<section id="example-4-external-llm-integration">
+<h2>Example 4. External LLM Integration<a class="headerlink" href="#example-4-external-llm-integration" title="Link to this heading">¶</a></h2>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="c1"># Create Agent with Mistral-7B-Instruct-v0.3 instead</span>
+<span class="n">agent</span> <span class="o">=</span> <span class="n">Agent</span><span class="p">(</span><span class="n">toolchain</span> <span class="o">=</span> <span class="s2">&quot;responses, history = mistral_api(prompt, history)&quot;</span><span class="p">)</span>
+
+<span class="c1"># Generate a neurology ICU admission note</span>
+<span class="n">agent</span><span class="p">(</span><span class="s1">&#39;Write a neurology ICU admission note.&#39;</span><span class="p">)</span>
+
+<span class="c1"># Follow-up questions (multi-turn conversation)</span>
+<span class="n">agent</span><span class="p">(</span><span class="s1">&#39;Give me the inpatient BP goal for this patient.&#39;</span><span class="p">)</span>
+<span class="n">agent</span><span class="p">(</span><span class="s1">&#39;DVT ppx for this pt?&#39;</span><span class="p">)</span>
+<span class="n">agent</span><span class="p">(</span><span class="s1">&#39;What is the px?&#39;</span><span class="p">)</span>
+
+<span class="c1"># End</span>
+<span class="n">agent</span><span class="o">.</span><span class="n">end</span><span class="p">()</span>
 </pre></div>
 </div>
 </section>

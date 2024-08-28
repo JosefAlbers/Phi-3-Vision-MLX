@@ -5,8 +5,14 @@ You can install and launch Phi-3-MLX from the command line:
 
 .. code-block:: bash
 
+    # Quick install (note: PyPI version may not always be up to date)
     pip install phi-3-vision-mlx
     phi3v
+
+    # For the latest version, you can install directly from the repository:
+    # git clone https://github.com/JosefAlbers/Phi-3-Vision-MLX.git
+    # cd Phi-3-Vision-MLX
+    # pip install -e .
 
 To use the library in a Python script:
 

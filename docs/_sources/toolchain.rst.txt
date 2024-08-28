@@ -59,3 +59,22 @@ Example 3: Multi-Agent Interaction
     # Continued from Example 2 above
     agent_writer = Agent(early_stop=100)
     agent_writer(f'Write a stock analysis report on: {user_input}', images)
+
+Example 4. External LLM Integration
+-----------------------------------
+
+.. code-block:: python
+
+    # Create Agent with Mistral-7B-Instruct-v0.3 instead
+    agent = Agent(toolchain = "responses, history = mistral_api(prompt, history)")
+
+    # Generate a neurology ICU admission note
+    agent('Write a neurology ICU admission note.')
+
+    # Follow-up questions (multi-turn conversation)
+    agent('Give me the inpatient BP goal for this patient.')
+    agent('DVT ppx for this pt?')
+    agent('What is the px?')
+
+    # End
+    agent.end()
