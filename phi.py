@@ -484,8 +484,9 @@ class Phi3DecoderLayer(nn.Module):
         r = self.mlp(self.post_attention_layernorm(h))
         return h + r
 
-class SuRoPE:
+class SuRoPE(nn.Module):
     def __init__(self, config, L_all, pids):
+        super().__init__()
         dim = config.hidden_size // config.num_attention_heads
         scaling_factor = math.sqrt(1 + math.log(config.max_position_embeddings / config.original_max_position_embeddings) / math.log(config.original_max_position_embeddings))
         su_factor = config.rope_scaling["long_factor"] if L_all > config.original_max_position_embeddings else config.rope_scaling["short_factor"]
@@ -499,11 +500,11 @@ class SuRoPE:
         inv_freq_expanded = mx.repeat(inv_freq[None, :, None], position_ids.shape[0], axis=0)
         freqs = (inv_freq_expanded @ position_ids_expanded).transpose(0, 2, 1)
         emb = mx.concatenate([freqs, freqs], axis=-1)
-        self.cos = mx.expand_dims(mx.cos(emb) * scaling_factor, axis=1)
-        self.sin = mx.expand_dims(mx.sin(emb) * scaling_factor, axis=1)
+        self._cos = mx.expand_dims(mx.cos(emb) * scaling_factor, axis=1)
+        self._sin = mx.expand_dims(mx.sin(emb) * scaling_factor, axis=1)
 
     def __call__(self, past_L, new_L):
-        return self.cos[:,:,past_L:past_L+new_L,:], self.sin[:,:,past_L:past_L+new_L,:]
+        return self._cos[:,:,past_L:past_L+new_L,:], self._sin[:,:,past_L:past_L+new_L,:]
 
 class KVCache:
     def __init__(self, config, x, max_tokens):
@@ -578,11 +579,11 @@ class Phi3F(nn.Module):
             x = self.vision_embed_tokens(x, pixel_values, image_sizes, positions)
         if cache is None:
             cache = [KVCache(self.config, x, max_tokens) for _ in range(self.num_hidden_layers)]
-            self.masker = Mask4D(x.shape[1]+max_tokens, mask)
-            self.roper = SuRoPE(self.config, x.shape[1]+max_tokens, pids)
+            self._masker = Mask4D(x.shape[1]+max_tokens, mask)
+            self._roper = SuRoPE(self.config, x.shape[1]+max_tokens, pids)
         past_L, new_L = cache[0].offset, x.shape[1]
-        mask = self.masker(past_L, new_L)
-        cos, sin = self.roper(past_L, new_L)
+        mask = self._masker(past_L, new_L)
+        cos, sin = self._roper(past_L, new_L)
         for i, l in enumerate(self.layers):
             x = l(x, cache[i], cos, sin, mask, n_beam)
         if advance_offset is not None:

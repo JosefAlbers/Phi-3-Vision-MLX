@@ -5,7 +5,7 @@ Phi-3-MLX is a versatile AI framework that leverages both the Phi-3-Vision multi
 ## Features
 
 - Integration with [Phi-3.5-vision](https://huggingface.co/microsoft/Phi-3.5-vision-instruct) model
-- Support for the [Phi-3.5-mini-instruct](https://huggingface.co/microsoft/Phi-3.5-mini-instruct) model
+- Support for the [Phi-3.5-mini](https://huggingface.co/microsoft/Phi-3.5-mini-instruct) model
 - Optimized performance on Apple Silicon using MLX
 - Batched generation for processing multiple prompts
 - Flexible agent system for various AI tasks
@@ -28,11 +28,17 @@ For optimal performance, especially when working with larger models or datasets,
 Install and launch Phi-3-MLX from command line:
 
 ```bash
+# Quick install (note: PyPI version may not always be up to date)
 pip install phi-3-vision-mlx
 phi3v
+
+# For the latest version, you can install directly from the repository:
+# git clone https://github.com/JosefAlbers/Phi-3-Vision-MLX.git
+# cd Phi-3-Vision-MLX
+# pip install -e .
 ```
 
-To instead use the library in a Python script:
+To use the library in a Python script:
 
 ```python
 from phi_3_vision_mlx import generate
@@ -267,9 +273,9 @@ benchmark()
 
 | Task                  | Vanilla Model | Quantized Model | Quantized Cache | LoRA Adapter |
 |-----------------------|---------------|-----------------|-----------------|--------------|
-| Text Generation       |  24.87 tps     |  58.61 tps      |  18.47 tps       |  24.74 tps    |
-| Image Captioning      |  19.08 tps     |  37.43 tps      |  3.58 tps       |  18.88 tps    |
-| Batched Generation    |  235.79 tps     |  147.94 tps      |  122.02 tps       |  233.09 tps    |
+| Text Generation       |  25.02 tps     |  61.01 tps      |  18.68 tps       |  24.72 tps    |
+| Image Captioning      |  21.29 tps     |  44.26 tps      |  5.56 tps       |  20.48 tps    |
+| Batched Generation    |  236.60 tps     |  149.23 tps      |  121.92 tps       |  232.78 tps    |
 
 *(On M1 Max 64GB)*
 

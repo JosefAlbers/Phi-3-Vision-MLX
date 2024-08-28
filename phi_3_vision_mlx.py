@@ -529,6 +529,11 @@ def _constrain(model, processor, prompt, constraints, return_full_text=False, mu
     len_ps = [len(p) for p in prompt]
     synth_pad = mx.tile(mx.array([ID_EOS]), (len(prompt), 1))
     for constraint in constraints:
+        if isinstance(constraint, str):
+            _output = _choose_from(model, processor, prompt, constraint, True)
+            output = [' '.join([p, o]) for p, o in zip(prompt, _output)]
+            prompt = output
+            continue
         constraint_text = constraint[1]
         id_constraint = mx.array(processor.tokenizer.encode(constraint_text, add_special_tokens=False)[1:])
         dict_input = processor(prompt)
@@ -1141,7 +1146,7 @@ def test_lora(model_path=PATH_QUANTIZED_PHI3_BLIND, adapter_path=True, dataset_p
             'q_col':'input',
             'q_until':None,
             'q_format':'',
-            'fxn':partial(_constrain, model=model, processor=processor, constraints=[(0, '\nThe'), (100, ' The correct answer is'), (1, 'X.')], verbose=False, mute=True, use_beam=False),
+            'fxn':partial(_constrain, model=model, processor=processor, constraints=[(0, '\nThe'), (100, ' The correct answer is'), 'ABCDE'], verbose=False, mute=True, use_beam=False),
             'a_format':'The correct answer is ',
             'a_col':'constrained_attempt',
             'c_col':'output',
@@ -1151,7 +1156,7 @@ def test_lora(model_path=PATH_QUANTIZED_PHI3_BLIND, adapter_path=True, dataset_p
             'q_col':'input',
             'q_until':None,
             'q_format':'',
-            'fxn':partial(_constrain, model=model, processor=processor, constraints=[(0, '\nThe'), (100, ' The correct answer is'), (1, 'X.')], verbose=False, mute=True, use_beam=True),
+            'fxn':partial(_constrain, model=model, processor=processor, constraints=[(0, '\nThe'), (100, ' The correct answer is'), 'ABCDE'], verbose=False, mute=True, use_beam=True),
             'a_format':'The correct answer is ',
             'a_col':'beamed_attempt',
             'c_col':'output',
@@ -1393,6 +1398,8 @@ def choose(prompt, choices='ABCDE', images=None, preload=None, blind_model=False
         If True, uses cache quantization for improved memory efficiency. Default is False.
     use_adapter : bool, optional
         If True, uses a LoRA adapter with the model for fine-tuned behavior. Default is False.
+    verbose : bool, optional
+        If True, print additional information during execution. Default is True.
     apply_chat_template : bool, optional
         If True, applies a chat template to the prompt before processing. Default is True.
 
@@ -1415,7 +1422,7 @@ def choose(prompt, choices='ABCDE', images=None, preload=None, blind_model=False
         prompt, _ = _apply_chat_template(prompt, images, verbose)
     return _choose_from(*preload, prompt=prompt, choices=choices)
 
-def constrain(prompt, constraints=[(0, '\nThe'), (100, ' The correct answer is'), (1, 'X.')], images=None, preload=None, blind_model=False, quantize_model=False, quantize_cache=False, use_adapter=False, verbose=True, apply_chat_template=True, use_beam=False):
+def constrain(prompt, constraints=[(0, '\nThe'), (100, ' The correct answer is'), 'ABCDE'], images=None, preload=None, blind_model=False, quantize_model=False, quantize_cache=False, use_adapter=False, verbose=True, apply_chat_template=True, use_beam=False):
     """
     Perform constrained decoding on the given prompt using specified constraints.
 
@@ -1426,10 +1433,11 @@ def constrain(prompt, constraints=[(0, '\nThe'), (100, ' The correct answer is')
     -----------
     prompt : str or list of str
         The input prompt(s) for text generation.
-    constraints : list of tuple, optional
-        List of constraints in the format [(max_tokens, constraint_text), ...].
-        Each constraint specifies the maximum number of tokens to generate before the constraint_text
-        must appear. Default is [(30, ' The correct answer is'), (10, 'X.')].
+    constraints : list, optional
+        List of constraints. Each constraint can be:
+        - A tuple (max_tokens, constraint_text): Specifies the maximum number of tokens to generate
+            before the constraint_text must appear.
+        - A string: Triggers the use of _choose_from() to select from the given options.
     images : list or None, optional
         List of image inputs for multimodal models. Default is None.
     preload : tuple or None, optional
@@ -1443,6 +1451,8 @@ def constrain(prompt, constraints=[(0, '\nThe'), (100, ' The correct answer is')
         If True, uses cache quantization for improved memory efficiency. Default is False.
     use_adapter : bool, optional
         If True, uses a LoRA adapter with the model for fine-tuned behavior. Default is False.
+    verbose : bool, optional
+        If True, print additional information during execution. Default is True.
     apply_chat_template : bool, optional
         If True, applies a chat template to the prompt before processing. Default is True.
     use_beam : bool, optional
@@ -1458,15 +1468,17 @@ def constrain(prompt, constraints=[(0, '\nThe'), (100, ' The correct answer is')
     ------
     - The function preprocesses the prompt and applies the constraints sequentially.
     - It uses either a custom constrained generation algorithm or beam search to ensure the output adheres to the constraints.
+    - When a constraint is a string, it uses _choose_from() to select from the given options.
     - The output format matches the input format (str or list of str).
     - If apply_chat_template is True, the prompt is processed through a chat template before generation.
 
     Example:
     --------
-    >>> prompt = "Write a Python function to calculate the Fibonacci sequence up to a given number n."
+    >>> prompt = "What is the capital of France?"
     >>> constraints = ...
     >>> result = constrain(prompt, constraints)
     >>> print(result)
+    'The capital of France is Paris. The correct answer is C'
     """
     if preload is None:
         preload = load(blind_model=blind_model, quantize_model=quantize_model, quantize_cache=quantize_cache, use_adapter=use_adapter)
