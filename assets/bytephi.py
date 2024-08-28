@@ -58,6 +58,7 @@ from transformers import AutoTokenizer
 import time
 
 RNN_SIZE = 2
+VCB_SIZE = 128
 
 class Phi3MLP(nn.Module):
     def __init__(self, config):
@@ -81,7 +82,7 @@ class Phi3DecoderLayer(nn.Module):
         self.post_attention_layernorm = nn.RMSNorm(config.hidden_size, eps=config.rms_norm_eps)
 
     def __call__(self, x, position_ids, attention_mask, cache):
-        r, cache = self.rnn(self.input_layernorm(x)) #, position_ids, attention_mask, cache)
+        r, cache = self.rnn(self.input_layernorm(x), cache) #, position_ids, attention_mask, cache)
         r = self.proj_rnn(r)
         h = x + r
         r = self.mlp(self.post_attention_layernorm(h))
@@ -91,7 +92,7 @@ class Phi3Model(nn.Module):
     def __init__(self, config):
         super().__init__()
         # self.embed_tokens = nn.Embedding(config.vocab_size, config.hidden_size)
-        self.embed_rnn = nn.Embedding(256, config.hidden_size)
+        self.embed_rnn = nn.Embedding(VCB_SIZE, config.hidden_size)
         self.layers = [Phi3DecoderLayer(config) for _ in range(config.num_hidden_layers)]
         self.norm = nn.RMSNorm(config.hidden_size, eps=config.rms_norm_eps)
 
@@ -108,37 +109,42 @@ class Phi3ForCausalLM(nn.Module):
         super().__init__()
         self.model = Phi3Model(config)
         # self.lm_head = nn.Linear(config.hidden_size, config.vocab_size, bias=False)
-        self.lm_rnn = nn.Linear(config.hidden_size, 256, bias=False)
+        self.lm_rnn = nn.Linear(config.hidden_size, VCB_SIZE, bias=False)
 
     def __call__(self, input_ids, pixel_values=None, image_sizes=None, position_ids=None, attention_mask=None, cache=None):
         x, cache = self.model(input_ids, pixel_values, image_sizes, position_ids, attention_mask, cache)
         # return self.lm_head(x), cache
         return self.lm_rnn(x), cache
 
-def load(model_id='microsoft/Phi-3.5-mini-instruct', init=False):
+def load_model(model_id='microsoft/Phi-3.5-mini-instruct', adapter_path=None, init=False):
     model_path = snapshot_download(model_id)
     with open(f"{model_path}/config.json", "r") as f:
         config = json.load(f)
     model_config = SimpleNamespace(**config)
-    model_weight = [(k, v) for wf in glob.glob(f"{model_path}/*.safetensors") for k, v in mx.load(wf).items()]
     model = Phi3ForCausalLM(model_config)
-    if init:
+
+    model_weight = [(k, v) for wf in glob.glob(f"{model_path}/*.safetensors") for k, v in mx.load(wf).items()]
+    model.load_weights(model_weight, strict=False)
+    if adapter_path:
+        model.load_weights(adapter_path, strict=False)
+    elif init:
         init_fn = nn.init.glorot_uniform()
         model.apply_to_modules(lambda k, v: v.apply(init_fn) if k.endswith('rnn') else None)
-    model.load_weights(model_weight, strict=False)
     mx.eval(model.parameters())
     model.eval()
     return model
 
 def generate(model, prompt='Hello world!'):
     model.eval()
+    prompt = prompt.lower()
     input_ids = mx.array(list(prompt.encode('utf-8')))[None]
-    logits, _ = model(input_ids)
+    logits, cache = model(input_ids)
+    # print('hey', logits.shape)
     token = mx.argmax(logits[:, -1, :], axis=-1)
     list_tokens = token.tolist()
     for i in range(10):
-        input_ids = mx.concatenate([input_ids, token[None]], axis=-1)
-        logits, _ = model(input_ids)
+        logits, cache = model(token[:,None], cache)
+        # print('hoy', logits.shape)
         token = mx.argmax(logits[:, -1, :], axis=-1)
         list_tokens += token.tolist()
     output = bytes(list_tokens).decode('utf-8', errors='ignore')
@@ -148,8 +154,8 @@ def train(learning_rate=1e-3, num_epochs=10, batch_size=32, seq_length=64):
     def load_data(file_path, train_sep=512, eval_sep=-127, encoding='utf-8'):
         with open(file_path, 'r', encoding=encoding) as f:
             lines = f.readlines()
-        train_data = ''.join(lines[:train_sep])
-        eval_data = ''.join(lines[eval_sep:])
+        train_data = ''.join(lines[:train_sep]).lower()
+        eval_data = ''.join(lines[eval_sep:]).lower()
         return train_data, eval_data
 
     def create_batches(data, batch_size, seq_length, encoding='utf-8'):
@@ -158,8 +164,13 @@ def train(learning_rate=1e-3, num_epochs=10, batch_size=32, seq_length=64):
         np.random.shuffle(sequences)
         for i in range(0, len(sequences), batch_size):
             batch = sequences[i:i+batch_size]
-            x = [list(seq[:-1].encode(encoding))[:seq_length] for seq in batch]
-            y = [list(seq[1:].encode(encoding))[:seq_length] for seq in batch]
+            # print('batch:', batch)
+            batch = [list(seq.encode(encoding))[:seq_length+1] for seq in batch]
+            # print('batch encoded:', batch)
+            x = [seq[:-1] for seq in batch]
+            # print('x:', x)
+            y = [seq[1:] for seq in batch]
+            # print('y:', y)
             yield mx.array(x), mx.array(y)
 
     def loss_fn(model, X, y):
@@ -177,7 +188,7 @@ def train(learning_rate=1e-3, num_epochs=10, batch_size=32, seq_length=64):
             num_batches += 1
         return total_loss / num_batches
 
-    model = load(init=True)
+    model = load_model(init=True)
     train_data, val_data = load_data('input.txt')
     model.set_dtype(mx.float32)
     model.freeze()
@@ -210,14 +221,23 @@ def train(learning_rate=1e-3, num_epochs=10, batch_size=32, seq_length=64):
     generated_text = generate(model, seed_text)
     print(f"Generated text:\n{seed_text}{generated_text}")
 
-train(learning_rate=1e-2, num_epochs=3, batch_size = 1, seq_length = 64)
+train(learning_rate=1e-3, num_epochs=6, batch_size = 1, seq_length = 64)
+model = load_model(adapter_path='trained.safetensors')
+print(generate(model, 'First Citi'))
 
 # Output:
-# Epoch 1/3, Average Loss: 13.1153 (51.11 sec)
-# Validation Loss: 6.4273 (5.31 sec)
-# Epoch 2/3, Average Loss: 3.4649 (51.50 sec)
-# Validation Loss: 5.4141 (5.23 sec)
-# Epoch 3/3, Average Loss: 3.0026 (51.80 sec)
-# Validation Loss: 5.2234 (5.42 sec)
+# Epoch 1/6, Average Loss: 4.0448 (53.28 sec)
+# Validation Loss: 3.1952 (5.28 sec)
+# Epoch 2/6, Average Loss: 2.6916 (51.76 sec)
+# Validation Loss: 3.0308 (5.26 sec)
+# Epoch 3/6, Average Loss: 2.5070 (52.08 sec)
+# Validation Loss: 2.9546 (5.28 sec)
+# Epoch 4/6, Average Loss: 2.4094 (52.64 sec)
+# Validation Loss: 2.9938 (5.29 sec)
+# Epoch 5/6, Average Loss: 2.3065 (51.41 sec)
+# Validation Loss: 3.0093 (5.24 sec)
+# Epoch 6/6, Average Loss: 2.2415 (51.29 sec)
+# Validation Loss: 2.9584 (5.26 sec)
 # Generated text:
-# To be or not to be, whene gNIUS
+# To be or not to be, tin in in i
+# zen in in i
