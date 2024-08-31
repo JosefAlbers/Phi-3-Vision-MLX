@@ -1,42 +1,25 @@
 """
-BytePhi: Experimental Universal Byte-Level Phi-3 Variant with RNN Integration
+BytePhi: Experimental Byte-Level Phi-3 Variant with RNN Integration
 
-This script presents an exploratory architectural prototype that reimagines
-the Phi-3 model as a universal byte-level processor, inspired by recent
-advancements in byte-level models like bGPT. By operating directly on raw
-bytes, this implementation eliminates the need for a tokenizer and extends
-its potential application beyond text to any file type, aligning with the
-concept of "Digital World Simulators" introduced in the bGPT paper.
+Key Features:
+1. Universal Byte-Level Processing: Operates on raw byte sequences, enabling application to any file type.
+2. Tokenizer-Free Approach: Bypasses traditional tokenization for more flexible processing.
+3. RNN Integration: Uses LSTM layers instead of self-attention, exploring synergies between recurrent architectures and the Phi model.
+4. Simplified Architecture: Streamlines Phi-3 components to focus on byte-level and RNN experiments.
 
-Key Features and Modifications:
-
-1. Universal Byte-Level Processing: Works directly with raw byte sequences,
-   enabling potential application to any file type, not just text.
-2. Tokenizer-Free Approach: Bypasses traditional tokenization, allowing for
-   more flexible and potentially more efficient processing.
-3. RNN Integration: Substitutes the self-attention mechanism with LSTM layers,
-   exploring synergies between recurrent architectures and the Phi model.
-4. Simplified Architecture: Streamlines certain components of the Phi-3 model
-   to focus on byte-level and RNN experiments.
-
-It's important to note that this implementation represents a significant
-departure from the original Phi-3 architecture. It serves as a proof-of-concept
-and a starting point for further research rather than a refined or optimized model.
+Advantages of RNN over Attention in this context:
+- Constant memory usage regardless of sequence length
+- Efficient processing of long byte sequences
+- Natural handling of sequential data
+- Potential for streaming applications
+- Simpler implementation for byte-level inputs
 
 Goals:
+- Explore feasibility of a universal model for processing any file type
+- Investigate advantages of bypassing traditional tokenization
+- Examine synergies between RNN characteristics and Phi model architecture
 
-- The feasibility of a universal model capable of processing any file type,
-  similar to bGPT's approach to simulating the digital world.
-- Potential advantages of bypassing traditional tokenization in language models.
-- Synergies between RNN characteristics and the Phi model's architecture.
-
-Note: This code is not suitable for production use and may contain
-inconsistencies or suboptimal implementations. It is intended purely
-for experimental purposes and as a springboard for further research.
-
-References:
-- bGPT paper: "Beyond Language Models: Byte Models are Digital World Simulators"
-  (https://arxiv.org/abs/2402.19155)
+Note: This is an experimental prototype not suitable for production use.
 
 Author: Josef Albers
 Date: Aug 28, 2024
@@ -44,9 +27,7 @@ Date: Aug 28, 2024
 
 import glob
 import json
-import math
 from types import SimpleNamespace
-from typing import List, Union
 
 import mlx.core as mx
 import mlx.nn as nn
@@ -54,11 +35,47 @@ import mlx.optimizers as optim
 import numpy as np
 from huggingface_hub import snapshot_download
 from mlx.utils import tree_flatten
-from transformers import AutoTokenizer
 import time
 
 RNN_SIZE = 2
-VCB_SIZE = 128
+VCB_SIZE = 39
+
+class BasicRNN(nn.Module):
+    def __init__(self, input_size, hidden_size, output_size):
+        super().__init__()
+        self.hidden_size = hidden_size
+        self.cell_rnn = nn.Linear(input_size + hidden_size, hidden_size)
+        self.output_rnn = nn.Linear(hidden_size, output_size)
+
+    def __call__(self, x, hidden=None):
+        if hidden is None:
+            hidden = mx.zeros((x.shape[0], self.hidden_size))
+
+        outputs = []
+        for i in range(x.shape[1]):
+            combined = mx.concatenate([x[:, i, :], hidden], axis=1)
+            hidden = mx.tanh(self.cell_rnn(combined))
+            outputs.append(hidden)
+
+        outputs = mx.stack(outputs, axis=1)
+        return self.output_rnn(outputs), hidden
+
+class Tokenizer:
+    def __init__(self, file_path='input.txt'):
+        with open(file_path, 'r') as f:
+            content = f.read().lower().encode('utf-8')
+        self.vocab = sorted(set(content))
+        self.vocab_size = len(self.vocab)
+        self.byte_to_index = {byte: index for index, byte in enumerate(self.vocab)}
+        self.index_to_byte = {index: byte for index, byte in enumerate(self.vocab)}
+
+    def encode(self, text):
+        byte_seq = text.lower().encode('utf-8')
+        return [self.byte_to_index[byte] for byte in byte_seq]
+
+    def decode(self, indices):
+        byte_seq = bytes(self.index_to_byte[index] for index in indices)
+        return byte_seq.decode('utf-8', errors='ignore')
 
 class Phi3MLP(nn.Module):
     def __init__(self, config):
@@ -75,15 +92,16 @@ class Phi3DecoderLayer(nn.Module):
     def __init__(self, config):
         super().__init__()
         # self.self_attn = Phi3Attention(config)
-        self.rnn = nn.LSTM(input_size=config.hidden_size, hidden_size=RNN_SIZE, bias=False)
-        self.proj_rnn = nn.Linear(RNN_SIZE, config.hidden_size, bias=False)
+        # self.rnn = nn.LSTM(input_size=config.hidden_size, hidden_size=RNN_SIZE, bias=False)
+        # self.proj_rnn = nn.Linear(RNN_SIZE, config.hidden_size, bias=False)
+        self.rnn = BasicRNN(config.hidden_size, RNN_SIZE, config.hidden_size)
         self.mlp = Phi3MLP(config)
         self.input_layernorm = nn.RMSNorm(config.hidden_size, eps=config.rms_norm_eps)
         self.post_attention_layernorm = nn.RMSNorm(config.hidden_size, eps=config.rms_norm_eps)
 
     def __call__(self, x, position_ids, attention_mask, cache):
         r, cache = self.rnn(self.input_layernorm(x), cache) #, position_ids, attention_mask, cache)
-        r = self.proj_rnn(r)
+        # r = self.proj_rnn(r)
         h = x + r
         r = self.mlp(self.post_attention_layernorm(h))
         return h + r, cache
@@ -109,53 +127,47 @@ class Phi3ForCausalLM(nn.Module):
         super().__init__()
         self.model = Phi3Model(config)
         # self.lm_head = nn.Linear(config.hidden_size, config.vocab_size, bias=False)
-        self.lm_rnn = nn.Linear(config.hidden_size, VCB_SIZE, bias=False)
+        # self.lm_rnn = nn.Linear(config.hidden_size, VCB_SIZE, bias=False)
 
     def __call__(self, input_ids, pixel_values=None, image_sizes=None, position_ids=None, attention_mask=None, cache=None):
         x, cache = self.model(input_ids, pixel_values, image_sizes, position_ids, attention_mask, cache)
         # return self.lm_head(x), cache
-        return self.lm_rnn(x), cache
+        # return self.lm_rnn(x), cache
+        return self.model.embed_rnn.as_linear(x), cache
 
-def load_model(model_id='microsoft/Phi-3.5-mini-instruct', adapter_path=None, init=False):
-    model_path = snapshot_download(model_id)
+def load_model(model_id='microsoft/Phi-3.5-mini-instruct', adapter_path=None):
+    model_path = snapshot_download(model_id, allow_patterns=["*.safetensors", "config.json"])
     with open(f"{model_path}/config.json", "r") as f:
         config = json.load(f)
     model_config = SimpleNamespace(**config)
     model = Phi3ForCausalLM(model_config)
-
     model_weight = [(k, v) for wf in glob.glob(f"{model_path}/*.safetensors") for k, v in mx.load(wf).items()]
     model.load_weights(model_weight, strict=False)
     if adapter_path:
         model.load_weights(adapter_path, strict=False)
-    elif init:
-        init_fn = nn.init.glorot_uniform()
-        model.apply_to_modules(lambda k, v: v.apply(init_fn) if k.endswith('rnn') else None)
     mx.eval(model.parameters())
     model.eval()
     return model
 
-def generate(model, prompt='Hello world!'):
+def generate(model, prompt='Hello world!', max_tokens=10):
     model.eval()
-    prompt = prompt.lower()
-    input_ids = mx.array(list(prompt.encode('utf-8')))[None]
+    input_ids = mx.array(tokenizer.encode(prompt))[None]
     logits, cache = model(input_ids)
-    # print('hey', logits.shape)
     token = mx.argmax(logits[:, -1, :], axis=-1)
     list_tokens = token.tolist()
-    for i in range(10):
-        logits, cache = model(token[:,None], cache)
-        # print('hoy', logits.shape)
+    for i in range(max_tokens):
+        logits, cache = model(token[:,None], cache=cache)
         token = mx.argmax(logits[:, -1, :], axis=-1)
         list_tokens += token.tolist()
-    output = bytes(list_tokens).decode('utf-8', errors='ignore')
+    output = tokenizer.decode(list_tokens)
     return output
 
-def train(learning_rate=1e-3, num_epochs=10, batch_size=32, seq_length=64):
+def train(learning_rate, num_epochs, batch_size=1, seq_length=64):
     def load_data(file_path, train_sep=512, eval_sep=-127, encoding='utf-8'):
         with open(file_path, 'r', encoding=encoding) as f:
             lines = f.readlines()
-        train_data = ''.join(lines[:train_sep]).lower()
-        eval_data = ''.join(lines[eval_sep:]).lower()
+        train_data = ''.join(lines[:train_sep])
+        eval_data = ''.join(lines[eval_sep:])
         return train_data, eval_data
 
     def create_batches(data, batch_size, seq_length, encoding='utf-8'):
@@ -164,50 +176,53 @@ def train(learning_rate=1e-3, num_epochs=10, batch_size=32, seq_length=64):
         np.random.shuffle(sequences)
         for i in range(0, len(sequences), batch_size):
             batch = sequences[i:i+batch_size]
-            # print('batch:', batch)
-            batch = [list(seq.encode(encoding))[:seq_length+1] for seq in batch]
-            # print('batch encoded:', batch)
+            batch = [tokenizer.encode(seq)[:seq_length+1] for seq in batch]
             x = [seq[:-1] for seq in batch]
-            # print('x:', x)
             y = [seq[1:] for seq in batch]
-            # print('y:', y)
             yield mx.array(x), mx.array(y)
 
     def loss_fn(model, X, y):
         logits, _ = model(X)
-        return mx.mean(nn.losses.cross_entropy(logits, y))
+        return nn.losses.cross_entropy(logits, y, reduction='mean')
 
     def evaluate(model, data, batch_size, seq_length):
         model.eval()
         total_loss = 0
         num_batches = 0
         for X, y in create_batches(data, batch_size, seq_length):
-            logits, _ = model(X)
-            loss = mx.mean(nn.losses.cross_entropy(logits, y))
-            total_loss += loss.item()
+            total_loss += loss_fn(model, X, y).item()
             num_batches += 1
         return total_loss / num_batches
 
-    model = load_model(init=True)
     train_data, val_data = load_data('input.txt')
+    model = load_model()
     model.set_dtype(mx.float32)
     model.freeze()
-    model.apply_to_modules(lambda k, v: v.unfreeze() if k.endswith("rnn") else None)
+    model.apply_to_modules(lambda k, v: v.unfreeze() if (k.endswith("rnn") or k.endswith("norm")) else None)
     mx.eval(model.parameters())
-    # print("Trainable parameters:", [i[0] for i in tree_flatten(model.trainable_parameters())])
     model.train()
-    optimizer = optim.Adam(learning_rate=learning_rate)
+    # print("Trainable parameters:", [i[0] for i in tree_flatten(model.trainable_parameters())])
+    num_batches_per_epoch = len(list(create_batches(train_data, batch_size, seq_length)))
+    num_steps = num_epochs * num_batches_per_epoch
+    num_warmup = num_steps // 6
+    if num_warmup > 1:
+        warmup = optim.linear_schedule(1e-5, learning_rate, steps=num_warmup)
+        cosine = optim.cosine_decay(learning_rate, num_steps, 1e-5)
+        lr_schedule = optim.join_schedules([warmup, cosine], [num_warmup])
+    else:
+        lr_schedule = optim.cosine_decay(learning_rate, num_epochs, 1e-5)
+    optimizer = optim.Adam(learning_rate=lr_schedule)
     loss_and_grad_fn = nn.value_and_grad(model, loss_fn)
+    mx.eval(model, optimizer)
     for epoch in range(num_epochs):
         model.train()
         tic = time.perf_counter()
-        model.train()
         total_loss = 0
         num_batches = 0
         for X, y in create_batches(train_data, batch_size, seq_length):
             loss, grads = loss_and_grad_fn(model, X, y)
             optimizer.update(model, grads)
-            mx.eval(loss, model.state, optimizer.state)
+            mx.eval(loss, model, optimizer)
             total_loss += loss.item()
             num_batches += 1
         avg_loss = total_loss / num_batches
@@ -216,28 +231,86 @@ def train(learning_rate=1e-3, num_epochs=10, batch_size=32, seq_length=64):
         if val_data is not None:
             val_loss = evaluate(model, val_data, batch_size, seq_length)
             print(f"Validation Loss: {val_loss:.4f} ({time.perf_counter() - tic:.2f} sec)")
-    mx.save_safetensors(f'trained.safetensors', dict(tree_flatten(model.trainable_parameters())))
-    seed_text = "To be or not to be, "
-    generated_text = generate(model, seed_text)
-    print(f"Generated text:\n{seed_text}{generated_text}")
+    mx.save_safetensors(f'trained_rnn.safetensors', dict(tree_flatten(model.trainable_parameters())))
+    # print(generate(model, 'First Citi'))
+    del model
 
-train(learning_rate=1e-3, num_epochs=6, batch_size = 1, seq_length = 64)
-model = load_model(adapter_path='trained.safetensors')
-print(generate(model, 'First Citi'))
+# Train byte-level tokenizer on input file
+tokenizer = Tokenizer('input.txt')
 
-# Output:
-# Epoch 1/6, Average Loss: 4.0448 (53.28 sec)
-# Validation Loss: 3.1952 (5.28 sec)
-# Epoch 2/6, Average Loss: 2.6916 (51.76 sec)
-# Validation Loss: 3.0308 (5.26 sec)
-# Epoch 3/6, Average Loss: 2.5070 (52.08 sec)
-# Validation Loss: 2.9546 (5.28 sec)
-# Epoch 4/6, Average Loss: 2.4094 (52.64 sec)
-# Validation Loss: 2.9938 (5.29 sec)
-# Epoch 5/6, Average Loss: 2.3065 (51.41 sec)
-# Validation Loss: 3.0093 (5.24 sec)
-# Epoch 6/6, Average Loss: 2.2415 (51.29 sec)
-# Validation Loss: 2.9584 (5.26 sec)
-# Generated text:
-# To be or not to be, tin in in i
-# zen in in i
+# Train BasicRNN model
+train(learning_rate=5e-4, num_epochs=30)
+
+# Load trained model for inference
+model = load_model(adapter_path='trained_rnn.safetensors')
+
+# Test model with a prompt
+prompt = 'First Citi'
+output = generate(model, prompt)
+print(f'{prompt=} + {output=}')
+print('->', prompt+output)
+
+# Output
+# Epoch 1/30, Average Loss: 3.1337 (35.23 sec)
+# Validation Loss: 3.0752 (3.86 sec)
+# Epoch 2/30, Average Loss: 2.6952 (35.28 sec)
+# Validation Loss: 2.9284 (3.87 sec)
+# Epoch 3/30, Average Loss: 2.5035 (35.15 sec)
+# Validation Loss: 2.8503 (3.87 sec)
+# Epoch 4/30, Average Loss: 2.4400 (35.17 sec)
+# Validation Loss: 2.9207 (3.87 sec)
+# Epoch 5/30, Average Loss: 2.4050 (35.15 sec)
+# Validation Loss: 2.8648 (3.87 sec)
+# Epoch 6/30, Average Loss: 2.3595 (35.13 sec)
+# Validation Loss: 2.8455 (3.87 sec)
+# Epoch 7/30, Average Loss: 2.3162 (35.33 sec)
+# Validation Loss: 2.8317 (3.87 sec)
+# Epoch 8/30, Average Loss: 2.2820 (35.35 sec)
+# Validation Loss: 2.8188 (3.87 sec)
+# Epoch 9/30, Average Loss: 2.2303 (35.19 sec)
+# Validation Loss: 2.8053 (3.87 sec)
+# Epoch 10/30, Average Loss: 2.1794 (35.16 sec)
+# Validation Loss: 2.7430 (3.87 sec)
+# Epoch 11/30, Average Loss: 2.1205 (35.14 sec)
+# Validation Loss: 2.8014 (3.87 sec)
+# Epoch 12/30, Average Loss: 2.0724 (35.21 sec)
+# Validation Loss: 2.7510 (3.87 sec)
+# Epoch 13/30, Average Loss: 2.0021 (35.19 sec)
+# Validation Loss: 2.8714 (3.87 sec)
+# Epoch 14/30, Average Loss: 1.9445 (35.15 sec)
+# Validation Loss: 2.7669 (4.06 sec)
+# Epoch 15/30, Average Loss: 1.8880 (35.23 sec)
+# Validation Loss: 2.8897 (3.88 sec)
+# Epoch 16/30, Average Loss: 1.8303 (35.35 sec)
+# Validation Loss: 2.8665 (3.87 sec)
+# Epoch 17/30, Average Loss: 1.7786 (35.24 sec)
+# Validation Loss: 2.9124 (3.87 sec)
+# Epoch 18/30, Average Loss: 1.7248 (35.17 sec)
+# Validation Loss: 2.9546 (3.88 sec)
+# Epoch 19/30, Average Loss: 1.6639 (35.15 sec)
+# Validation Loss: 2.8796 (3.88 sec)
+# Epoch 20/30, Average Loss: 1.6003 (35.14 sec)
+# Validation Loss: 2.9574 (3.87 sec)
+# Epoch 21/30, Average Loss: 1.5466 (35.18 sec)
+# Validation Loss: 2.9303 (3.88 sec)
+# Epoch 22/30, Average Loss: 1.4900 (35.18 sec)
+# Validation Loss: 3.0458 (3.87 sec)
+# Epoch 23/30, Average Loss: 1.4178 (35.34 sec)
+# Validation Loss: 3.0667 (3.87 sec)
+# Epoch 24/30, Average Loss: 1.3671 (35.37 sec)
+# Validation Loss: 3.0175 (3.87 sec)
+# Epoch 25/30, Average Loss: 1.3240 (35.18 sec)
+# Validation Loss: 3.1004 (3.87 sec)
+# Epoch 26/30, Average Loss: 1.2761 (35.23 sec)
+# Validation Loss: 3.2157 (3.87 sec)
+# Epoch 27/30, Average Loss: 1.2167 (35.43 sec)
+# Validation Loss: 3.3013 (3.89 sec)
+# Epoch 28/30, Average Loss: 1.1635 (35.16 sec)
+# Validation Loss: 3.3696 (3.88 sec)
+# Epoch 29/30, Average Loss: 1.1254 (35.16 sec)
+# Validation Loss: 3.4558 (3.87 sec)
+# Epoch 30/30, Average Loss: 1.0822 (35.17 sec)
+# Validation Loss: 3.4743 (4.03 sec)
+# prompt='First Citi' + output='zen:\nwhat t'
+# -> First Citizen:
+# what t
