@@ -216,6 +216,8 @@ class Phi3Attention(nn.Module):
             if attention_mask is not None:
                 mask += mx.where(attention_mask[:, :, None]*attention_mask[:, None, :]==1, 0, -mx.inf)
                 mask = mx.expand_dims(mask, 1)
+            else:
+                mask = mask[None, None]
         else:
             past_k, past_v, past_p, past_m = cache
             position_ids = past_p[:,-1:]+1
