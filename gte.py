@@ -173,6 +173,27 @@ result = client.predict(
 print('<|api_output|>'+result)
 ```
 """,
+"""Text to speech
+```python
+import os
+import requests
+endpoint = "https://api.minimax.io/v1/t2a_v2"
+response = requests.post(
+        endpoint,
+        headers={
+            "Authorization": "Bearer " + os.environ["MINIMAX_API_KEY"],
+            "Content-Type": "application/json",
+        },
+        json={
+            "model": "speech-2.8-hd",
+            "text": "{prompt}",
+            "stream": False,
+            "output_format": "mp3",
+        },
+)
+print('<|api_output|>'+response.json()["data"]["audio"])
+```
+""",
 """Transcribe youtube video
 ```python
 from gradio_client import Client
