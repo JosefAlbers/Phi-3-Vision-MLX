@@ -1,4 +1,4 @@
-# Phi-3-MLX: Language and Vision Models for Apple Silicon
+# Phi: Language and Vision Models for Apple Silicon
 
 Phi-3-MLX is a versatile AI framework that leverages both the Phi-3-Vision multimodal model and the Phi-3-Mini-128K language model, optimized for Apple Silicon using the MLX framework. This project provides an easy-to-use interface for a wide range of AI tasks, from advanced text generation to visual question answering and code execution.
 
