@@ -63,6 +63,18 @@ agent.end()
 agent('Speak "People say nothing is impossible, but I do nothing every day."')
 agent.end()
 
+# Text-to-Speech
+
+## MiniMax TTS (speech-2.8-hd is the default; other MiniMax TTS models are also available)
+agent = pv.Agent(toolchain = "responses = minimax_tts_api(prompt)")
+agent('People say nothing is impossible, but I do nothing every day.')
+agent.end()
+
+### Selecting the China endpoint and a different MiniMax TTS model
+agent = pv.Agent(toolchain = 'responses = minimax_tts_api(prompt, region="cn_zh", model="speech-2.8-turbo")')
+agent('People say nothing is impossible, but I do nothing every day.')
+agent.end()
+
 # Toolchain
 
 ## LLM Backend Hotswap
