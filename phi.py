@@ -555,6 +555,7 @@ class KVCache:
             return self.kv[0,:,:,:new_offset,:], self.kv[1,:,:,:new_offset,:]
 
 class Mask4D:
+    MASK_NEG = mx.array(-1e4)
     def __init__(self, L_all, mask):
         mask_4d = mx.triu(mx.full((L_all, L_all), -mx.inf), k=1)[None, None]
         if mask is not None:
@@ -562,7 +563,7 @@ class Mask4D:
             mask = mx.pad(mask, ((0,0),(0,pad_len)), constant_values=1)
             mask = mx.expand_dims(mask, (1,2))
             mask = mask*mask.transpose(0,1,3,2)
-            mask = mx.where(mask==1, 0, -mx.inf)
+            mask = mx.where(mask==1, 0, self.MASK_NEG)
             mask_4d += mask
         self.mask_4d = mask_4d
 
