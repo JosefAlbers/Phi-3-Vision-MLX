@@ -227,7 +227,7 @@ class ClipVModel(nn.Module):
 
 class Phi3FProcessor:
     def __init__(self, local_dir, return_mx=True):
-        self.tokenizer = AutoTokenizer.from_pretrained(local_dir, trust_remote_code=True)
+        self.tokenizer = AutoTokenizer.from_pretrained(local_dir, trust_remote_code=False)
         self.return_mx = return_mx
 
     def _tokenize(self, texts):
