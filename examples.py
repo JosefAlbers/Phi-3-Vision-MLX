@@ -40,9 +40,9 @@ pv.train_lora(
 )
 
 ## Test
-test_lora(adapter_path=None)                         # Without LoRA adapter
-test_lora(adapter_path=True)                         # With default LoRA adapter
-test_lora(adapter_path="adapters/phi3_mini_128k_Q")  # With specific adapter
+pv.test_lora(adapter_path=None)                         # Without LoRA adapter
+pv.test_lora(adapter_path=True)                         # With default LoRA adapter
+pv.test_lora(adapter_path="adapters/phi3_mini_128k_Q")  # With specific adapter
 
 # Agent
 

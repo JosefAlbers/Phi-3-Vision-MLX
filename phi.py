@@ -227,7 +227,7 @@ class ClipVModel(nn.Module):
 
 class Phi3FProcessor:
     def __init__(self, local_dir, return_mx=True):
-        self.tokenizer = AutoTokenizer.from_pretrained(local_dir)
+        self.tokenizer = AutoTokenizer.from_pretrained(local_dir, trust_remote_code=True)
         self.return_mx = return_mx
 
     def _tokenize(self, texts):
@@ -559,7 +559,7 @@ class Mask4D:
         mask_4d = mx.triu(mx.full((L_all, L_all), -mx.inf), k=1)[None, None]
         if mask is not None:
             pad_len = L_all - mask.shape[-1]
-            mask = mx.pad(mask, ((0,0),(0,pad_len)), 1)
+            mask = mx.pad(mask, ((0,0),(0,pad_len)), constant_values=1)
             mask = mx.expand_dims(mask, (1,2))
             mask = mask*mask.transpose(0,1,3,2)
             mask = mx.where(mask==1, 0, -mx.inf)
