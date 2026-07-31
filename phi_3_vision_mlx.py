@@ -26,7 +26,7 @@ from huggingface_hub import snapshot_download
 from mlx.utils import tree_flatten, tree_unflatten
 from PIL import Image
 
-from api import bark_api, mistral_api
+from api import bark_api, deepseek_api
 from gte import VDB, GteModel
 from phi import (LoRALinear, Phi3ForCausalLM, Phi3FProcessor, Phi3VForCausalLM,
                  Phi3VProcessor, Tic, TrainingCallback)

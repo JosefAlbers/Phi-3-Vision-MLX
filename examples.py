@@ -66,7 +66,7 @@ agent.end()
 # Toolchain
 
 ## LLM Backend Hotswap
-agent = pv.Agent(toolchain = "responses, history = mistral_api(prompt, history)")
+agent = pv.Agent(toolchain = "responses, history = deepseek_api(prompt, history)")
 agent('Write a neurology ICU admission note')
 agent('Give me the inpatient BP goal for this patient.')
 agent('DVT ppx for this pt?')
@@ -76,7 +76,7 @@ agent.end()
 # Misc
 
 ## ICL
-pv.add_text('How to inspect API endpoints? @https://raw.githubusercontent.com/gradio-app/gradio/main/guides/08_gradio-clients-and-lite/01_getting-started-with-the-python-client.md')
+pv.add_text('How to inspect API endpoints? @https://github.com/gradio-app/gradio/blob/45c11d52e518a59ffaf1d688e13ceaafd7f1477c/guides/09_gradio-clients-and-lite/01_getting-started-with-the-python-client.md')
 
 ## RAG
 pv.rag('Comparison of Sortino Ratio for Bitcoin and Ethereum.')
