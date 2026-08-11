@@ -1,7 +1,0 @@
-mlx==0.29.3
-transformers==4.49.0
-numpy==1.26.4
-matplotlib==3.9.0
-datasets==2.19.1
-gradio==4.31.5
-requests==2.32.3
